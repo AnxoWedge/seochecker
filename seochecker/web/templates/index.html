@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}seochecker — new crawl{% endblock %}
+{% block body %}
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<h2>Crawl a site</h2>
+<form method="post" action="{{ url_for('start_run') }}" class="panel">
+  <div class="pad">
+    <label for="url">URL</label>
+    <input type="text" id="url" name="url" placeholder="example.com" required autofocus
+           value="{{ request.form.get('url', '') }}">
+    <div class="note">The scheme is optional. Crawls stay on this site unless you allow subdomains.</div>
+
+    <div class="grid" style="margin-top:18px">
+      <div><label for="max_pages">Page budget</label>
+        <input type="number" id="max_pages" name="max_pages" value="50" min="1" max="5000"></div>
+      <div><label for="max_depth">Max depth</label>
+        <input type="number" id="max_depth" name="max_depth" value="5" min="0" max="20"></div>
+      <div><label for="concurrency">Concurrency</label>
+        <input type="number" id="concurrency" name="concurrency" value="4" min="1" max="16"></div>
+      <div><label for="delay">Delay (s)</label>
+        <input type="number" id="delay" name="delay" value="0.4" min="0" max="30" step="0.1"></div>
+      <div><label for="render">JavaScript</label>
+        <select id="render" name="render">
+          <option value="auto">Render when needed</option>
+          <option value="never">Never render</option>
+          <option value="always">Always render</option>
+        </select></div>
+    </div>
+
+    <div class="checks">
+      <label><input type="checkbox" name="subdomains"> Follow subdomains</label>
+      <label><input type="checkbox" name="no_sitemap"> Ignore sitemaps</label>
+      <label><input type="checkbox" name="check_external"> Check external links</label>
+      <label><input type="checkbox" name="ignore_robots"> Ignore robots.txt</label>
+    </div>
+    <div class="note">Ignoring robots.txt is for sites you own. Checking external links sends
+      requests to third-party servers.</div>
+
+    <div style="margin-top:20px">
+      <button type="submit" {{ 'disabled' if active >= 2 }}>Start crawl</button>
+      {% if active >= 2 %}<span class="note" style="margin-left:12px">Two crawls are already running.</span>{% endif %}
+    </div>
+  </div>
+</form>
+
+<h2>Recent runs</h2>
+<div class="panel">
+{% if runs %}
+  <table>
+    <thead><tr><th>Site</th><th>Status</th><th style="text-align:right">Pages</th>
+      <th style="text-align:right">Score</th><th style="text-align:right">Elapsed</th><th></th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      {% set d = r.to_dict() %}
+      <tr>
+        <td class="mono">{{ d.target }}</td>
+        <td><span class="pill {{ d.status }}">{{ d.status }}</span></td>
+        <td style="text-align:right">{{ d.pages_done }}</td>
+        <td style="text-align:right">{{ d.score if d.score is not none else '—' }}{% if d.grade %} <span class="pill">{{ d.grade }}</span>{% endif %}</td>
+        <td style="text-align:right">{{ '%.0fs'|format(d.elapsed) }}</td>
+        <td style="text-align:right"><a href="{{ url_for('show_run', run_id=r.id) }}">open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="empty">No runs yet. Runs live in memory, so restarting the server clears this list —
+    use the History tab for runs recorded to a database.</div>
+{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ run.target }} — seochecker{% endblock %}
+{% block body %}
+
+<h2>Crawl</h2>
+<div class="panel"><div class="pad">
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;justify-content:space-between">
+    <div>
+      <div class="mono" style="font-size:16px;font-weight:600;word-break:break-all">{{ run.target }}</div>
+      <div class="note" id="stopped"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="pill {{ run.status }}" id="status">{{ run.status }}</span>
+      <span id="score" style="font-size:26px;font-weight:700;letter-spacing:-.02em"></span>
+    </div>
+  </div>
+
+  <div style="margin-top:18px;height:6px;border-radius:3px;background:var(--bar);overflow:hidden">
+    <i id="bar" style="display:block;height:100%;width:0;background:var(--accent);
+       border-radius:3px;transition:width .3s"></i>
+  </div>
+  <div class="note" id="progress">starting…</div>
+  <div class="note mono" id="current" style="word-break:break-all;min-height:1.4em"></div>
+
+  <div style="display:flex;gap:18px;margin-top:16px;font-size:13.5px">
+    <span class="c-critical"><b id="n-critical">0</b> critical</span>
+    <span class="c-warning"><b id="n-warning">0</b> warning</span>
+    <span class="c-notice"><b id="n-notice">0</b> notice</span>
+    <span class="c-info"><b id="n-info">0</b> info</span>
+  </div>
+
+  <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap" id="actions">
+    <button type="button" id="cancel" class="ghost">Stop crawl</button>
+    <a class="btn" id="report" href="{{ url_for('run_report', run_id=run.id) }}"
+       target="_blank" rel="noopener" hidden>Open report</a>
+    <a class="btn ghost" id="dl-html" href="{{ url_for('download', run_id=run.id, fmt='html') }}" hidden>Download HTML</a>
+    <a class="btn ghost" id="dl-json" href="{{ url_for('download', run_id=run.id, fmt='json') }}" hidden>JSON</a>
+    <a class="btn ghost" id="dl-csv" href="{{ url_for('download', run_id=run.id, fmt='csv') }}" hidden>CSV</a>
+  </div>
+  <div class="error" id="failure" style="margin:18px 0 0" hidden></div>
+</div></div>
+
+<div id="reportframe" hidden>
+  <h2>Report</h2>
+  <div class="panel" style="padding:0">
+    <iframe id="frame" style="width:100%;height:78vh;border:0;display:block;border-radius:10px"
+            title="SEO report"></iframe>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+(function(){
+  var runId = {{ run.id|tojson }};
+  var statusUrl = {{ url_for('run_status', run_id=run.id)|tojson }};
+  var cancelUrl = {{ url_for('cancel_run', run_id=run.id)|tojson }};
+  var reportUrl = {{ url_for('run_report', run_id=run.id)|tojson }};
+  var el = function(id){ return document.getElementById(id); };
+  var finished = false;
+
+  function paint(d){
+    el('status').textContent = d.status;
+    el('status').className = 'pill ' + d.status;
+    var known = Math.max(d.pages_known, d.pages_done, 1);
+    var pct = d.status === 'running' ? Math.min(99, d.pages_done / known * 100) : 100;
+    el('bar').style.width = pct + '%';
+    el('progress').textContent = d.pages_done + ' of ' + known +
+      ' page' + (known === 1 ? '' : 's') + ' · ' + d.elapsed.toFixed(0) + 's';
+    el('current').textContent = d.status === 'running' ? (d.current_url || '') : '';
+    ['critical','warning','notice','info'].forEach(function(k){
+      el('n-' + k).textContent = d.counts[k];
+    });
+    if (d.stopped_because) el('stopped').textContent = 'stopped: ' + d.stopped_because;
+
+    if (d.status !== 'running' && !finished) {
+      finished = true;
+      el('cancel').hidden = true;
+      if (d.status === 'failed') {
+        el('failure').hidden = false;
+        el('failure').textContent = d.error || 'The crawl failed.';
+        return;
+      }
+      if (d.score !== null && d.score !== undefined) {
+        el('score').textContent = Math.round(d.score);
+        el('score').className = d.score >= 80 ? 'c-ok' : (d.score >= 60 ? 'c-warning' : 'c-critical');
+      }
+      ['report','dl-html','dl-json','dl-csv'].forEach(function(id){ el(id).hidden = false; });
+      el('reportframe').hidden = false;
+      el('frame').src = reportUrl;
+    }
+  }
+
+  function poll(){
+    fetch(statusUrl).then(function(r){ return r.json(); }).then(function(d){
+      paint(d);
+      if (d.status === 'running') setTimeout(poll, 700);
+    }).catch(function(){ setTimeout(poll, 2000); });
+  }
+
+  el('cancel').addEventListener('click', function(){
+    el('cancel').disabled = true;
+    el('cancel').textContent = 'Stopping…';
+    fetch(cancelUrl, {method: 'POST'});
+  });
+
+  poll();
+})();
+</script>
+{% endblock %}

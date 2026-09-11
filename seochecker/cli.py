@@ -70,8 +70,8 @@ async def audit_single(
     return page, (doc.summary() if doc else None), technologies, stats
 
 
-async def run_crawl(config: CrawlConfig, on_page=None) -> CrawlResult:
-    crawler = Crawler(config, on_page=on_page)
+async def run_crawl(config: CrawlConfig, on_page=None, should_stop=None) -> CrawlResult:
+    crawler = Crawler(config, on_page=on_page, should_stop=should_stop)
     result = await crawler.run()
     result.site_findings = run_site_analyzers(
         SiteContext(

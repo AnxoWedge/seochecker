@@ -99,6 +99,16 @@ class CrawlConfig:
         return urlsplit(self.url).netloc
 
 
+# urlsplit will happily report "not a url at all" as a hostname, which then fails
+# much later as a confusing DNS error. Checking the shape here turns that into an
+# immediate, obvious message.
+_HOSTNAME = re.compile(
+    r"^(?:[0-9A-Fa-f]*:[0-9A-Fa-f:.]*"                           # IPv6 (urlsplit strips the brackets)
+    r"|[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?"              # first label
+    r"(?:\.[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)*\.?)$"   # further labels
+)
+
+
 def normalize_target(raw: str) -> str:
     """Accept `example.com`, `example.com/path` or a full URL; return a full URL."""
     raw = raw.strip()
@@ -111,6 +121,9 @@ def normalize_target(raw: str) -> str:
         raise ValueError(f"unsupported scheme: {parts.scheme!r}")
     if not parts.netloc:
         raise ValueError(f"could not parse a host out of {raw!r}")
+    host = parts.hostname or ""
+    if not _HOSTNAME.match(host):
+        raise ValueError(f"{host!r} is not a valid hostname")
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", parts.query, ""))
 
 

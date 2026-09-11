@@ -10,6 +10,24 @@ python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ```
 
+## Dashboard
+
+```bash
+./venv/bin/pip install flask
+./venv/bin/python serve.py --db runs.sqlite3
+```
+
+Then open <http://127.0.0.1:8770>. Paste a URL, watch the crawl page by page, and
+read the report in the browser — or download it as HTML, JSON or CSV. Crawls can
+be stopped mid-run and still produce a report for what they found. The History tab
+shows every run recorded to the database, with the score change and which findings
+appeared or were fixed since last time.
+
+It binds to localhost, and that default matters: this app fetches any URL it is
+given, so anything that can reach it can use the machine to make requests on its
+behalf. `--host` prints a warning before it lets you change that; put
+authentication in front of it first.
+
 ## Usage
 
 Crawl a site and produce a report you can send to someone:
@@ -324,7 +342,8 @@ The suite runs against a throwaway localhost server — no outside requests.
 ## Layout
 
 ```
-seocheck.py              entrypoint
+seocheck.py              CLI entrypoint
+serve.py                 dashboard entrypoint
 seochecker/
   cli.py                 argument handling, report assembly, terminal output
   config.py              CrawlConfig + the CLI definition
@@ -340,6 +359,9 @@ seochecker/
   graph.py               internal link graph: PageRank, click depth, orphans
   similarity.py          MinHash sketches for near-duplicate detection
   render.py              headless rendering and the decision of when to use it
+  web/
+    app.py runner.py     the dashboard: routes, and crawls on background threads
+    templates/           its pages
   score.py               the scoring model, and the calibration behind it
   report/
     html_out.py          self-contained HTML report
@@ -360,4 +382,6 @@ tests/test_crawl.py       scope, dedup, robots, sitemap, limits
 tests/test_sitewide.py    duplicates, link graph, soft 404s, external links
 tests/test_render.py      the render heuristic, and rendering end to end
 tests/test_report.py      the scoring calibration table, and the report writers
+tests/test_politeness.py  pacing, the circuit breaker, and the cache
+tests/test_web.py         the dashboard, end to end
 ```

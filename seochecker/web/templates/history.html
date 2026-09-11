@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}History — seochecker{% endblock %}
+{% block body %}
+<h2>Recorded runs</h2>
+{% if not db %}
+  <div class="panel"><div class="empty">
+    No database configured. Start the dashboard with <code>--db runs.sqlite3</code> to keep a
+    history of crawls and compare them over time.</div></div>
+{% elif not rows %}
+  <div class="panel"><div class="empty">
+    Nothing recorded in <code>{{ db }}</code> yet. Runs recorded by the CLI
+    (<code>--db</code>) appear here too.</div></div>
+{% else %}
+  {% for row in rows %}
+    <div class="panel" style="margin-bottom:16px">
+      <div class="pad" style="padding-bottom:6px">
+        <div class="mono" style="font-weight:600;word-break:break-all">{{ row.target }}</div>
+        {% if row.diff %}
+          {% set change = row.diff.score_change %}
+          <div class="note">
+            Since {{ row.diff.previous.started_at }}:
+            <b class="{{ 'c-ok' if change > 0 else ('c-critical' if change < 0 else '') }}">
+              {{ '%+.1f'|format(change) }}</b> points ·
+            {{ row.diff.introduced|length }} new ·
+            {{ row.diff.resolved|length }} resolved
+          </div>
+        {% endif %}
+      </div>
+      <table>
+        <thead><tr><th>When</th><th style="text-align:right">Pages</th>
+          <th style="text-align:right">Score</th><th style="text-align:right">Grade</th></tr></thead>
+        <tbody>
+        {% for r in row.runs %}
+          <tr><td class="mono">{{ r.started_at }}</td>
+            <td style="text-align:right">{{ r.pages }}</td>
+            <td style="text-align:right">{{ '%.1f'|format(r.score) if r.score is not none else '—' }}</td>
+            <td style="text-align:right">{{ r.grade or '—' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if row.diff and (row.diff.introduced or row.diff.resolved) %}
+        <div class="pad" style="border-top:1px solid var(--border);font-size:13px">
+          {% for s, fid, url in row.diff.introduced[:6] %}
+            <div><span class="pill {{ s }}">new</span> <span class="mono">{{ fid }}</span>
+              <span class="note" style="margin:0">{{ url }}</span></div>
+          {% endfor %}
+          {% for s, fid, url in row.diff.resolved[:6] %}
+            <div><span class="pill done">fixed</span> <span class="mono">{{ fid }}</span>
+              <span class="note" style="margin:0">{{ url }}</span></div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

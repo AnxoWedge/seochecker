@@ -89,7 +89,10 @@ class Handler(BaseHTTPRequestHandler):
                 "/a", "/b", "/admin/secret", "/a?utm_source=news", "/a#frag",
                 "https://elsewhere.test/x", "/deep/1",
             ]))
-        if path.startswith("/a"):
+        # Exact match, not a prefix: the soft-404 probe requests a random hex
+        # path, which starts with "a" about one time in sixteen and made this
+        # fixture — and the dedup test built on it — intermittently wrong.
+        if path == "/a" or path.startswith("/a?"):
             return self._send(200, page("A", ["/", "/b"]))
         if path == "/b":
             return self._send(200, page("B", ["/c"]))

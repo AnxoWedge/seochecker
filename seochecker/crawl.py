@@ -65,7 +65,7 @@ class CrawlResult:
 
 
 class Crawler:
-    def __init__(self, config: CrawlConfig, *, on_page=None) -> None:
+    def __init__(self, config: CrawlConfig, *, on_page=None, should_stop=None) -> None:
         self.config = config
         self.thresholds = Thresholds()
         self.scope = Scope(
@@ -86,6 +86,9 @@ class Crawler:
         )
         self.result = CrawlResult()
         self.on_page = on_page
+        # Lets a caller (the dashboard's stop button) end a crawl cleanly, keeping
+        # whatever has been collected so far.
+        self.should_stop = should_stop
         self._sitemap_urls: set[str] = set()
         self._renderer: Renderer | None = None
         self._renders_used = 0
@@ -295,6 +298,13 @@ class Crawler:
         budget = self.config.max_time
         return bool(budget) and (time.perf_counter() - self._started) > budget
 
+    def _should_stop(self) -> str:
+        if self.should_stop is not None and self.should_stop():
+            return "cancelled"
+        if self._out_of_time():
+            return "time budget reached"
+        return ""
+
     async def run(self) -> CrawlResult:
         self._started = time.perf_counter()
         config = self.config
@@ -335,8 +345,8 @@ class Crawler:
                 while True:
                     task = await queue.get()
                     try:
-                        if self._out_of_time():
-                            self.result.stopped_because = "time budget reached"
+                        if reason := self._should_stop():
+                            self.result.stopped_because = reason
                             continue
                         await self._process(task, fetcher, queue)
                     except Exception as exc:  # noqa: BLE001 — one bad page, not one bad crawl
@@ -352,7 +362,7 @@ class Crawler:
             # Link discovery is done. If budget remains, validate the rest of the
             # sitemap — those are the entries most likely to be orphans.
             while (seeded < len(sitemap_urls) and not self.frontier.full
-                   and not self._out_of_time()):
+                   and not self._should_stop()):
                 before = seeded
                 seeded = self._seed_sitemap(queue, sitemap_urls, seeded, config.max_pages)
                 if seeded == before or queue.empty():
@@ -363,7 +373,7 @@ class Crawler:
                 task.cancel()
             await asyncio.gather(*workers, return_exceptions=True)
 
-            if config.check_external and not self._out_of_time():
+            if config.check_external and not self._should_stop():
                 self.result.external_links = await self._check_external_links(fetcher)
 
             self.result.blocked_hosts = dict(fetcher.tripped_hosts)
@@ -402,5 +412,5 @@ class Crawler:
         return self.result
 
 
-async def crawl(config: CrawlConfig, *, on_page=None) -> CrawlResult:
-    return await Crawler(config, on_page=on_page).run()
+async def crawl(config: CrawlConfig, *, on_page=None, should_stop=None) -> CrawlResult:
+    return await Crawler(config, on_page=on_page, should_stop=should_stop).run()

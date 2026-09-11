@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — seochecker{% endblock %}
+{% block body %}
+<div class="panel" style="margin-top:24px"><div class="pad">
+  <div style="font-size:34px;font-weight:700;letter-spacing:-.02em">{{ code }}</div>
+  <p style="color:var(--muted);margin:8px 0 18px">{{ message }}</p>
+  <a class="btn" href="{{ url_for('index') }}">Start a new crawl</a>
+</div></div>
+{% endblock %}
