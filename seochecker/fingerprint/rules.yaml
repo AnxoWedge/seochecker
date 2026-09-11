@@ -1,0 +1,505 @@
+# Technology fingerprints.
+#
+# Written from scratch rather than imported: Wappalyzer's dataset stopped being
+# open source in 2023, so this file has no licensing question attached to it.
+#
+# Signal types
+#   header      key = header name,  pattern matched against its value
+#   cookie      key = cookie name pattern (from Set-Cookie)
+#   meta        key = meta name,    pattern matched against content
+#   html        pattern searched in the raw HTML
+#   script      pattern matched against every <script src>
+#   stylesheet  pattern matched against every stylesheet href
+#   url         pattern matched against the final URL
+#   dom         selector, optionally attribute + pattern (for versions in attributes)
+#
+# `version:` is the capture-group number holding a version string.
+# `confidence:` is 0..1, default 0.7. Independent signals combine, so two
+# mediocre signals agreeing beat one good one. Use 1.0 only for a signal that
+# cannot plausibly appear on a site not using the technology.
+
+version: 1
+
+categories:
+  cms: Content management
+  ecommerce: E-commerce
+  page-builder: Page builder
+  seo-plugin: SEO plugin
+  framework: JavaScript framework
+  static-site: Static site generator
+  language: Server language
+  server: Web server
+  cdn: CDN / edge
+  hosting: Hosting
+  analytics: Analytics
+  tag-manager: Tag manager
+  advertising: Advertising / pixels
+  consent: Consent management
+  chat: Live chat
+  payment: Payments
+  font: Fonts
+  ui: UI framework
+  javascript: JavaScript library
+  security: Security
+
+technologies:
+
+  # ---------------------------------------------------------------- CMS -----
+  WordPress:
+    category: cms
+    website: https://wordpress.org
+    implies: [PHP]
+    signals:
+      - {type: meta, key: generator, pattern: '^WordPress(?:\s+(\d[\w.\-]*))?', version: 1, confidence: 1.0}
+      - {type: html, pattern: '/wp-content/', confidence: 0.9}
+      - {type: html, pattern: '/wp-includes/', confidence: 0.9}
+      - {type: header, key: x-pingback, pattern: 'xmlrpc\.php', confidence: 0.9}
+      - {type: header, key: link, pattern: '/wp-json/', confidence: 0.8}
+      - {type: cookie, key: '^wordpress_', confidence: 0.9}
+      - {type: cookie, key: '^wp-settings-', confidence: 0.9}
+
+  WooCommerce:
+    category: ecommerce
+    website: https://woocommerce.com
+    implies: [WordPress]
+    signals:
+      - {type: meta, key: generator, pattern: '^WooCommerce(?:\s+([\d.]+))?', version: 1, confidence: 1.0}
+      - {type: script, pattern: '/plugins/woocommerce/', confidence: 0.9}
+      - {type: cookie, key: '^woocommerce_', confidence: 0.9}
+      - {type: html, pattern: 'class="[^"]*woocommerce', confidence: 0.7}
+
+  Elementor:
+    category: page-builder
+    website: https://elementor.com
+    implies: [WordPress]
+    signals:
+      - {type: meta, key: generator, pattern: '^Elementor(?:\s+([\d.]+))?', version: 1, confidence: 1.0}
+      - {type: script, pattern: '/plugins/elementor', confidence: 0.9}
+      - {type: html, pattern: 'elementor-(?:widget|section|element)', confidence: 0.8}
+
+  Divi:
+    category: page-builder
+    website: https://elegantthemes.com/gallery/divi/
+    implies: [WordPress]
+    signals:
+      - {type: html, pattern: '/themes/Divi/', confidence: 0.9}
+      - {type: html, pattern: '\bet_pb_(?:section|row|column)', confidence: 0.8}
+
+  Yoast SEO:
+    category: seo-plugin
+    website: https://yoast.com
+    implies: [WordPress]
+    signals:
+      - {type: html, pattern: 'This site is optimized with the Yoast SEO plugin(?: v?([\d.]+))?', version: 1, confidence: 1.0}
+      - {type: html, pattern: 'yoast-schema-graph', confidence: 0.9}
+
+  Rank Math:
+    category: seo-plugin
+    website: https://rankmath.com
+    implies: [WordPress]
+    signals:
+      - {type: html, pattern: 'Rank Math WordPress SEO plugin', confidence: 1.0}
+      - {type: html, pattern: 'rank-math', confidence: 0.7}
+
+  Shopify:
+    category: ecommerce
+    website: https://shopify.com
+    signals:
+      - {type: header, key: x-shopify-stage, pattern: '.', confidence: 1.0}
+      - {type: header, key: x-shopid, pattern: '.', confidence: 1.0}
+      - {type: html, pattern: 'cdn\.shopify\.com', confidence: 0.9}
+      - {type: html, pattern: 'Shopify\.theme', confidence: 0.9}
+      - {type: cookie, key: '^_shopify_', confidence: 0.9}
+      - {type: script, pattern: '/cdn/shop(?:ifycloud)?/', confidence: 0.8}
+
+  Wix:
+    category: cms
+    website: https://wix.com
+    signals:
+      - {type: header, key: x-wix-request-id, pattern: '.', confidence: 1.0}
+      - {type: meta, key: generator, pattern: 'Wix\.com Website Builder', confidence: 1.0}
+      - {type: html, pattern: 'static\.parastorage\.com', confidence: 0.9}
+
+  Squarespace:
+    category: cms
+    website: https://squarespace.com
+    signals:
+      - {type: html, pattern: 'Static\.SQUARESPACE_CONTEXT', confidence: 1.0}
+      - {type: html, pattern: 'static1\.squarespace\.com', confidence: 0.9}
+      - {type: meta, key: generator, pattern: 'Squarespace', confidence: 1.0}
+
+  Webflow:
+    category: cms
+    website: https://webflow.com
+    signals:
+      - {type: meta, key: generator, pattern: 'Webflow', confidence: 1.0}
+      - {type: dom, selector: 'html[data-wf-page]', confidence: 0.9}
+      - {type: html, pattern: '(?:assets|cdn\.prod)\.website-files\.com', confidence: 0.9}
+
+  Framer:
+    category: cms
+    website: https://framer.com
+    signals:
+      - {type: meta, key: generator, pattern: '^Framer', confidence: 1.0}
+      - {type: html, pattern: 'framerusercontent\.com', confidence: 0.9}
+
+  Drupal:
+    category: cms
+    website: https://drupal.org
+    implies: [PHP]
+    signals:
+      - {type: meta, key: generator, pattern: '^Drupal\s*([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: header, key: x-generator, pattern: '^Drupal\s*([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: header, key: x-drupal-cache, pattern: '.', confidence: 0.9}
+      - {type: html, pattern: 'drupal-settings-json', confidence: 0.9}
+      - {type: html, pattern: '/sites/(?:default|all)/files/', confidence: 0.7}
+
+  Joomla:
+    category: cms
+    website: https://joomla.org
+    implies: [PHP]
+    signals:
+      - {type: meta, key: generator, pattern: '^Joomla!?\s*-?\s*([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: html, pattern: '/media/(?:jui|system)/js/', confidence: 0.8}
+      - {type: html, pattern: 'option=com_(?:content|users)', confidence: 0.7}
+
+  Ghost:
+    category: cms
+    website: https://ghost.org
+    signals:
+      - {type: meta, key: generator, pattern: '^Ghost(?:\s+([\d.]+))?', version: 1, confidence: 1.0}
+      - {type: html, pattern: '/assets/built/', confidence: 0.5}
+
+  HubSpot CMS:
+    category: cms
+    website: https://hubspot.com
+    signals:
+      - {type: html, pattern: '\.hs-sites\.com', confidence: 0.9}
+      - {type: html, pattern: 'hs_cos_wrapper', confidence: 0.9}
+
+  Magento:
+    category: ecommerce
+    website: https://magento.com
+    implies: [PHP]
+    signals:
+      - {type: cookie, key: '^X-Magento-Vary$', confidence: 1.0}
+      - {type: html, pattern: 'Magento_(?:Ui|Theme|Catalog)', confidence: 0.9}
+      - {type: html, pattern: '/static/version\d+/', confidence: 0.8}
+
+  PrestaShop:
+    category: ecommerce
+    website: https://prestashop.com
+    implies: [PHP]
+    signals:
+      - {type: meta, key: generator, pattern: '^PrestaShop', confidence: 1.0}
+      - {type: cookie, key: '^PrestaShop-', confidence: 1.0}
+      - {type: html, pattern: '/modules/ps_', confidence: 0.8}
+
+  # ---------------------------------------------------- JS frameworks -------
+  Next.js:
+    category: framework
+    website: https://nextjs.org
+    implies: [React]
+    signals:
+      - {type: header, key: x-powered-by, pattern: '^Next\.js(?:\s+([\d.]+))?', version: 1, confidence: 1.0}
+      - {type: html, pattern: '__NEXT_DATA__', confidence: 1.0}
+      - {type: html, pattern: '/_next/static/', confidence: 0.9}
+      - {type: dom, selector: '#__next', confidence: 0.8}
+
+  Nuxt:
+    category: framework
+    website: https://nuxt.com
+    implies: [Vue.js]
+    signals:
+      - {type: html, pattern: '__NUXT__', confidence: 1.0}
+      - {type: html, pattern: '/_nuxt/', confidence: 0.9}
+
+  Astro:
+    category: static-site
+    website: https://astro.build
+    signals:
+      - {type: meta, key: generator, pattern: '^Astro\s*v?([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: html, pattern: 'astro-island|data-astro-', confidence: 0.9}
+
+  Gatsby:
+    category: static-site
+    website: https://gatsbyjs.com
+    implies: [React]
+    signals:
+      - {type: meta, key: generator, pattern: '^Gatsby\s*([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: dom, selector: '#___gatsby', confidence: 1.0}
+      - {type: html, pattern: '/page-data/', confidence: 0.8}
+
+  SvelteKit:
+    category: framework
+    website: https://kit.svelte.dev
+    signals:
+      - {type: html, pattern: '__sveltekit', confidence: 1.0}
+      - {type: html, pattern: '/_app/immutable/', confidence: 0.9}
+
+  Hugo:
+    category: static-site
+    website: https://gohugo.io
+    signals:
+      - {type: meta, key: generator, pattern: '^Hugo\s*([\d.]+)?', version: 1, confidence: 1.0}
+
+  Jekyll:
+    category: static-site
+    website: https://jekyllrb.com
+    signals:
+      - {type: meta, key: generator, pattern: '^Jekyll\s*v?([\d.]+)?', version: 1, confidence: 1.0}
+
+  React:
+    category: framework
+    website: https://react.dev
+    signals:
+      # Modern React leaves almost no trace in server HTML, so these are weak on
+      # purpose — Next.js/Gatsby imply React with much better evidence.
+      - {type: html, pattern: 'data-reactroot', confidence: 0.9}
+      - {type: script, pattern: 'react(?:-dom)?[.@-]([\d.]+)?[^/]*\.js', version: 1, confidence: 0.6}
+
+  Vue.js:
+    category: framework
+    website: https://vuejs.org
+    signals:
+      - {type: html, pattern: '__VUE__|__vue_app__', confidence: 0.9}
+      - {type: script, pattern: 'vue(?:@|\.runtime|\.global|\.min)[^/]*([\d.]+)?', version: 1, confidence: 0.6}
+      - {type: dom, selector: '[data-v-app]', confidence: 0.7}
+
+  Angular:
+    category: framework
+    website: https://angular.dev
+    signals:
+      - {type: dom, selector: '[ng-version]', attribute: ng-version, pattern: '([\d.]+)', version: 1, confidence: 1.0}
+      - {type: html, pattern: '_nghost-|_ngcontent-', confidence: 0.8}
+
+  # --------------------------------------------------------- platform -------
+  PHP:
+    category: language
+    signals:
+      - {type: header, key: x-powered-by, pattern: '^PHP/?\s*([\d.]+)?', version: 1, confidence: 1.0}
+      - {type: cookie, key: '^PHPSESSID$', confidence: 0.9}
+
+  ASP.NET:
+    category: language
+    signals:
+      - {type: header, key: x-aspnet-version, pattern: '([\d.]+)', version: 1, confidence: 1.0}
+      - {type: header, key: x-powered-by, pattern: 'ASP\.NET', confidence: 1.0}
+      - {type: cookie, key: '^ASP\.NET_SessionId$', confidence: 0.9}
+
+  Ruby on Rails:
+    category: language
+    signals:
+      - {type: header, key: x-powered-by, pattern: 'Phusion Passenger', confidence: 0.8}
+      - {type: cookie, key: '_session_id$', confidence: 0.5}
+
+  nginx:
+    category: server
+    signals:
+      - {type: header, key: server, pattern: '^nginx(?:/([\d.]+))?', version: 1, confidence: 1.0}
+
+  Apache:
+    category: server
+    signals:
+      - {type: header, key: server, pattern: '^Apache(?:/([\d.]+))?', version: 1, confidence: 1.0}
+
+  LiteSpeed:
+    category: server
+    signals:
+      - {type: header, key: server, pattern: '^LiteSpeed', confidence: 1.0}
+      - {type: header, key: x-litespeed-cache, pattern: '.', confidence: 0.9}
+
+  IIS:
+    category: server
+    signals:
+      - {type: header, key: server, pattern: '^Microsoft-IIS(?:/([\d.]+))?', version: 1, confidence: 1.0}
+
+  Cloudflare:
+    category: cdn
+    signals:
+      - {type: header, key: cf-ray, pattern: '.', confidence: 1.0}
+      - {type: header, key: server, pattern: '^cloudflare', confidence: 1.0}
+
+  Vercel:
+    category: hosting
+    signals:
+      - {type: header, key: x-vercel-id, pattern: '.', confidence: 1.0}
+      - {type: header, key: server, pattern: '^Vercel', confidence: 1.0}
+
+  Netlify:
+    category: hosting
+    signals:
+      - {type: header, key: x-nf-request-id, pattern: '.', confidence: 1.0}
+      - {type: header, key: server, pattern: '^Netlify', confidence: 1.0}
+
+  Amazon CloudFront:
+    category: cdn
+    signals:
+      - {type: header, key: x-amz-cf-id, pattern: '.', confidence: 1.0}
+      - {type: header, key: via, pattern: 'CloudFront', confidence: 0.9}
+
+  Fastly:
+    category: cdn
+    signals:
+      - {type: header, key: x-fastly-request-id, pattern: '.', confidence: 1.0}
+      - {type: header, key: x-served-by, pattern: '^cache-', confidence: 0.8}
+
+  Akamai:
+    category: cdn
+    signals:
+      - {type: header, key: server, pattern: 'AkamaiGHost|AkamaiNetStorage', confidence: 1.0}
+      - {type: header, key: x-akamai-transformed, pattern: '.', confidence: 1.0}
+
+  GitHub Pages:
+    category: hosting
+    signals:
+      - {type: header, key: server, pattern: '^GitHub\.com', confidence: 1.0}
+
+  # -------------------------------------------------------- analytics -------
+  Google Analytics 4:
+    category: analytics
+    signals:
+      - {type: html, pattern: 'gtag\([''"]config[''"],\s*[''"]G-', confidence: 1.0}
+      - {type: script, pattern: 'googletagmanager\.com/gtag/js', confidence: 0.9}
+
+  Google Tag Manager:
+    category: tag-manager
+    signals:
+      - {type: html, pattern: 'googletagmanager\.com/gtm\.js', confidence: 1.0}
+      - {type: html, pattern: 'GTM-[A-Z0-9]{4,}', confidence: 0.9}
+
+  Google Analytics (Universal):
+    category: analytics
+    signals:
+      - {type: script, pattern: 'google-analytics\.com/(?:analytics|ga)\.js', confidence: 1.0}
+      - {type: html, pattern: '[''"]UA-\d{4,}-\d+[''"]', confidence: 0.9}
+
+  Meta Pixel:
+    category: advertising
+    signals:
+      - {type: html, pattern: 'fbq\([''"]init[''"]', confidence: 1.0}
+      - {type: script, pattern: 'connect\.facebook\.net/[^/]+/fbevents\.js', confidence: 1.0}
+
+  Hotjar:
+    category: analytics
+    signals:
+      - {type: html, pattern: 'static\.hotjar\.com|hjSettings', confidence: 1.0}
+
+  Microsoft Clarity:
+    category: analytics
+    signals:
+      - {type: html, pattern: 'clarity\.ms/tag', confidence: 1.0}
+
+  Plausible:
+    category: analytics
+    signals:
+      - {type: script, pattern: 'plausible\.io/js/', confidence: 1.0}
+
+  Matomo:
+    category: analytics
+    signals:
+      - {type: html, pattern: 'matomo\.(?:js|php)|piwik\.(?:js|php)', confidence: 1.0}
+
+  Cloudflare Web Analytics:
+    category: analytics
+    signals:
+      - {type: script, pattern: 'static\.cloudflareinsights\.com', confidence: 1.0}
+
+  # ---------------------------------------------------------- consent -------
+  Cookiebot:
+    category: consent
+    signals:
+      - {type: script, pattern: 'consent\.cookiebot\.com', confidence: 1.0}
+
+  OneTrust:
+    category: consent
+    signals:
+      - {type: script, pattern: 'cdn\.cookielaw\.org|onetrust', confidence: 1.0}
+
+  CookieYes:
+    category: consent
+    signals:
+      - {type: script, pattern: 'cdn-cookieyes\.com', confidence: 1.0}
+      - {type: html, pattern: 'cookie-law-info', confidence: 0.8}
+
+  Complianz:
+    category: consent
+    implies: [WordPress]
+    signals:
+      - {type: script, pattern: '/plugins/complianz', confidence: 1.0}
+
+  # ------------------------------------------------------------- chat -------
+  Intercom:
+    category: chat
+    signals:
+      - {type: html, pattern: 'widget\.intercom\.io|intercomSettings', confidence: 1.0}
+
+  Crisp:
+    category: chat
+    signals:
+      - {type: script, pattern: 'client\.crisp\.chat', confidence: 1.0}
+
+  Tawk.to:
+    category: chat
+    signals:
+      - {type: script, pattern: 'embed\.tawk\.to', confidence: 1.0}
+
+  Zendesk:
+    category: chat
+    signals:
+      - {type: script, pattern: 'static\.zdassets\.com', confidence: 1.0}
+
+  # ---------------------------------------------------------- payment -------
+  Stripe:
+    category: payment
+    signals:
+      - {type: script, pattern: 'js\.stripe\.com', confidence: 1.0}
+
+  PayPal:
+    category: payment
+    signals:
+      - {type: script, pattern: 'paypal\.com/(?:sdk|js)', confidence: 1.0}
+
+  # --------------------------------------------------------- security -------
+  reCAPTCHA:
+    category: security
+    signals:
+      - {type: script, pattern: 'google\.com/recaptcha|gstatic\.com/recaptcha', confidence: 1.0}
+
+  Cloudflare Turnstile:
+    category: security
+    signals:
+      - {type: script, pattern: 'challenges\.cloudflare\.com/turnstile', confidence: 1.0}
+
+  # ------------------------------------------------------------- libs -------
+  jQuery:
+    category: javascript
+    signals:
+      - {type: script, pattern: 'jquery[.\-/@]?(\d+\.\d+(?:\.\d+)?)?[^/]*\.js', version: 1, confidence: 0.9}
+
+  Bootstrap:
+    category: ui
+    signals:
+      - {type: stylesheet, pattern: 'bootstrap(?:[.\-@](\d+\.\d+(?:\.\d+)?))?[^/]*\.css', version: 1, confidence: 0.9}
+      - {type: script, pattern: 'bootstrap(?:\.bundle)?(?:\.min)?\.js', confidence: 0.8}
+
+  Tailwind CSS:
+    category: ui
+    signals:
+      - {type: script, pattern: 'cdn\.tailwindcss\.com', confidence: 1.0}
+
+  Font Awesome:
+    category: font
+    signals:
+      - {type: stylesheet, pattern: 'font-?awesome', confidence: 1.0}
+
+  Google Fonts:
+    category: font
+    signals:
+      - {type: stylesheet, pattern: 'fonts\.googleapis\.com', confidence: 1.0}
+      - {type: html, pattern: 'fonts\.gstatic\.com', confidence: 0.8}
+
+  Swiper:
+    category: javascript
+    signals:
+      - {type: script, pattern: 'swiper(?:-bundle)?(?:\.min)?\.js', confidence: 0.9}

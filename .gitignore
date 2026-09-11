@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.cache/
+out/
+*.sqlite3
+.DS_Store
+
+# working notes, not published
+PLAN.md

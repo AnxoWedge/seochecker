@@ -1,0 +1,6 @@
+# seochecker — Phase 1 dependencies
+httpx[http2]==0.28.1     # async client, HTTP/2, streaming
+selectolax==0.4.11       # fast HTML parsing (Modest/Lexbor)
+brotli==1.2.0            # so we can honestly advertise `br` in Accept-Encoding
+zstandard==0.25.0        # ...and `zstd`
+rich==15.0.0             # CLI output
