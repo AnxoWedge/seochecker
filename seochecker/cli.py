@@ -23,6 +23,7 @@ from .crawl import CrawlResult, Crawler
 from .config import CrawlConfig, config_from_args
 from .fetch import Fetcher
 from .fingerprint import Detection, Fingerprinter, group_by_category
+from .graph import LinkGraph
 from .html import Document
 from . import language
 from .models import Finding, Page, Severity
@@ -207,8 +208,31 @@ def summarise(findings: list[Finding]) -> dict[str, Any]:
     }
 
 
+def single_result(page: Page, technologies: list[Detection],
+                  stats: dict[str, Any]) -> CrawlResult:
+    """Wrap a one-page audit as a CrawlResult, so it can use the same reporting.
+
+    Without this, --html, --csv and --db were accepted in single mode and
+    silently did nothing.
+    """
+    result = CrawlResult(pages=[page], technologies=technologies, stats=stats)
+    result.graph = LinkGraph.build([page], page.final_url)
+    result.graph.apply_to([page])
+    return result
+
+
+def single_scorecard(page: Page) -> Scorecard:
+    return score(
+        page.findings,
+        pages=1,
+        categories=evaluated_categories(crawled=False, rendered=page.rendered,
+                                        external=False),
+    )
+
+
 def build_report(config: CrawlConfig, page: Page, seo: dict[str, Any] | None,
-                 technologies: list[Detection], stats: dict[str, Any]) -> dict[str, Any]:
+                 technologies: list[Detection], stats: dict[str, Any],
+                 card: Scorecard | None = None) -> dict[str, Any]:
     record = page.to_dict(include_html=config.include_html)
     record["seo"] = seo
     return {
@@ -225,6 +249,7 @@ def build_report(config: CrawlConfig, page: Page, seo: dict[str, Any] | None,
             "obey_robots": config.obey_robots,
         },
         "stats": stats,
+        "score": card.to_dict() if card else None,
         "summary": summarise(page.findings),
         "technologies": [tech.to_dict() for tech in technologies],
         "pages": [record],
@@ -691,7 +716,8 @@ def main(argv: list[str] | None = None) -> int:
         _write(json.dumps(build_crawl_report(config, result, card, comparison), indent=2,
                           ensure_ascii=False), config)
         for note in write_side_reports(config, result, card, comparison):
-            print(note, file=sys.stderr)
+            if not config.quiet:
+                print(note, file=sys.stderr)
         if not config.quiet:
             render_crawl(result, config, Severity(config.min_severity), card)
             if comparison:
@@ -704,12 +730,21 @@ def main(argv: list[str] | None = None) -> int:
         print("interrupted", file=sys.stderr)
         return 130
 
-    report = build_report(config, page, seo, technologies, stats)
-    payload = json.dumps(report, indent=2, ensure_ascii=False)
+    card = single_scorecard(page)
+    result = single_result(page, technologies, stats)
 
-    _write(payload, config)
+    _write(json.dumps(build_report(config, page, seo, technologies, stats, card),
+                      indent=2, ensure_ascii=False), config)
+    for note in write_side_reports(config, result, card):
+        if not config.quiet:
+            print(note, file=sys.stderr)
 
     if not config.quiet:
         render_human(page, seo, technologies, stats, Severity(config.min_severity))
+        colour = "green" if card.overall >= 80 else "yellow" if card.overall >= 60 else "red"
+        from rich.console import Console
+        Console(stderr=True).print(
+            f"[bold {colour}]Score {card.overall:.0f}/100 (grade {card.grade})"
+            f"[/bold {colour}]\n")
 
     return exit_code(page, config.fail_on)

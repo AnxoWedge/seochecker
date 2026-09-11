@@ -52,8 +52,11 @@ def rendering_gap(ctx: PageContext) -> Iterator[Finding]:
                 "Render the navigation server-side, or provide real <a href> links.",
         )
     elif links_after >= links_before * 2 and links_after - links_before >= 10:
+        # A separate id from the total case above: same subject, different
+        # severity and different advice. Sharing an id collapsed them into one
+        # group in the report and one deduction in the score.
         yield notice(
-            "render.links_require_js",
+            "render.some_links_require_js",
             f"{links_after - links_before} of {links_after} links appear only after rendering",
             fix="Links added by JavaScript are discovered late, if at all. Prefer real "
                 "<a href> markup in the served HTML.",

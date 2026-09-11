@@ -191,3 +191,98 @@ def crawl_shape(ctx: SiteContext) -> Iterator[Finding]:
                 "excluded them. If the site is JavaScript-rendered, the links may not be in "
                 "the served HTML at all.",
         )
+
+
+# Search crawlers whose exclusion costs visibility, and the token each reads in
+# robots.txt. Qwant runs Qwantbot (Qwantify is the older token).
+SEARCH_CRAWLERS = {
+    "googlebot": "Google",
+    "bingbot": "Bing",
+    "applebot": "Apple (Siri, Spotlight, Safari)",
+    "duckduckbot": "DuckDuckGo",
+    "qwantbot": "Qwant",
+    "qwantify": "Qwant (legacy token)",
+    "yandex": "Yandex",
+    "baiduspider": "Baidu",
+    "slurp": "Yahoo",
+}
+
+# Blocking these is a legitimate editorial choice, not a mistake, so it is
+# reported as information rather than a problem.
+AI_CRAWLERS = {
+    "gptbot": "OpenAI",
+    "google-extended": "Google AI training",
+    "applebot-extended": "Apple AI training",
+    "ccbot": "Common Crawl",
+    "claudebot": "Anthropic",
+    "perplexitybot": "Perplexity",
+    "bytespider": "ByteDance",
+}
+
+
+@site_analyzer
+def robots_blocks_search_engines(ctx: SiteContext) -> Iterator[Finding]:
+    """Named crawlers that robots.txt shuts out of the whole site."""
+    robots = ctx.robots
+    if not robots.fetched:
+        return
+
+    blocked_search = [
+        label for token, label in SEARCH_CRAWLERS.items()
+        if not robots.is_allowed(ctx.config.url, token)
+    ]
+    if blocked_search:
+        yield critical(
+            "robots.blocks_search_engine",
+            f"robots.txt blocks {len(blocked_search)} search engine(s) from the site",
+            evidence=", ".join(blocked_search),
+            fix="These crawlers are being told not to fetch this URL at all, so the site "
+                "cannot appear in their results. Remove the disallow rule unless that is "
+                "genuinely intended.",
+        )
+
+    blocked_ai = [
+        label for token, label in AI_CRAWLERS.items()
+        if not robots.is_allowed(ctx.config.url, token)
+    ]
+    if blocked_ai:
+        yield info(
+            "robots.blocks_ai_crawlers",
+            f"robots.txt blocks {len(blocked_ai)} AI crawler(s)",
+            evidence=", ".join(blocked_ai),
+            fix="Recorded for completeness — whether to allow AI crawlers is an editorial "
+                "decision, not an SEO problem.",
+        )
+
+
+@site_analyzer
+def robots_blocks_page_resources(ctx: SiteContext) -> Iterator[Finding]:
+    """CSS and JavaScript a renderer needs, disallowed in robots.txt.
+
+    Google: "if the absence of these resources make the page harder for Google's
+    crawler to understand the page, don't block them". Apple asks for the same:
+    Applebot needs the JavaScript and CSS required to render a page.
+    """
+    if not ctx.robots.fetched:
+        return
+
+    blocked: list[str] = []
+    seen: set[str] = set()
+    for page in ctx.pages:
+        for resource in (page.seo or {}).get("resources") or []:
+            if resource in seen:
+                continue
+            seen.add(resource)
+            if not ctx.robots.is_allowed(resource, "googlebot"):
+                blocked.append(resource)
+
+    if blocked:
+        yield warning(
+            "robots.blocks_resources",
+            f"robots.txt disallows {len(blocked)} CSS or JavaScript file(s) the pages need",
+            evidence=sample(blocked, 4),
+            affected=len(blocked),
+            fix="Crawlers render pages to understand them, and cannot render what they are "
+                "not allowed to fetch. Google and Apple both ask that the CSS and "
+                "JavaScript required to display a page stay crawlable.",
+        )

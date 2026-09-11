@@ -431,6 +431,10 @@ class Document:
             "images_missing_alt": len(missing_alt),
             "images_missing_alt_src": [img.src for img in missing_alt[:10]],
             "images_decorative": sum(1 for img in self.images if img.decorative),
+            # A sample is enough to test whether robots.txt blocks the resources a
+            # renderer needs; the whole list would bloat every page record.
+            "resources": (self.stylesheets[:8]
+                          + [s.url for s in self.scripts if s.url][:8]),
             "json_ld_blocks": len(self.json_ld),
             "json_ld_types": sorted(_schema_types(self.json_ld)),
         }

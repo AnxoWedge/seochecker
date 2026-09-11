@@ -286,7 +286,7 @@ Checks that need the finished crawl rather than one page:
 | `duplicate` | identical or near-identical titles, meta descriptions, H1s and body content |
 | `structure` | orphan pages, pages unreachable by following links, pages more than 3 clicks deep, dead ends, broken internal links *with the pages that contain them*, links pointing at redirects, soft 404s |
 | `sitemap` | missing, partly unreadable, and entries that 404, redirect, are `noindex` or canonicalise elsewhere |
-| `robots` | missing, unreachable, blocking the entire site, no sitemap declared |
+| `robots` | missing, unreachable, blocking the entire site, no sitemap declared, **blocking a named search engine**, **blocking the CSS/JS pages need**, AI crawlers blocked (recorded, not judged) |
 | `crawl` | parameter explosion from faceted navigation, URLs blocked by robots.txt |
 | `external` | broken outbound links (with `--check-external`) |
 
@@ -334,6 +334,17 @@ benefit of the doubt.
 Severities are `critical`, `warning`, `notice`, `info`. A page that is blocked or
 fails to fetch reports **only that** — a bot-mitigation challenge page is never
 described as if it were the site.
+
+A page marked `noindex` is deliberately kept out of search, so it is not judged on
+how it would look there: title length, meta description, canonical, social tags,
+structured data and thin content are all suppressed for it. What it *is* still
+judged on is everything that does not stop mattering — image alt text, headings,
+charset, viewport, security, and whether a crawler following `noindex, follow` can
+get out of it.
+
+Named crawlers are checked by token, so `Applebot`, `Qwantbot`, `Bingbot`,
+`DuckDuckBot` and the rest are each verified against robots.txt rather than assumed
+to behave like Googlebot.
 
 ## What it identifies
 

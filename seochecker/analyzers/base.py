@@ -32,6 +32,22 @@ ERROR_SAFE: set[str] = set()
 # Checks that need the whole crawl, not one page.
 SITE_REGISTRY: list["SiteAnalyzer"] = []
 
+# A page marked noindex is deliberately kept out of search, so how it would
+# *appear* there is moot: its title length, meta description, social tags and
+# structured data change nothing. Reporting them is noise, and it drags the score
+# down for pages doing exactly what they were told to.
+#
+# What still matters on a noindex page is kept: it can still be broken, insecure,
+# or a dead end for a crawler following `noindex, follow`, and its images still
+# need alt text for the people reading it.
+APPEARANCE_ONLY = (
+    "title.", "description.", "social.", "structured.", "canonical.", "url.",
+    "i18n.hreflang",
+)
+APPEARANCE_ONLY_IDS = frozenset({
+    "content.thin", "content.very_thin", "content.low_text_ratio",
+})
+
 # Most severe first, for sorting output.
 SEVERITY_ORDER = {
     Severity.CRITICAL: 0,
@@ -117,7 +133,7 @@ class PageContext:
     page: Page
     doc: Document | None
     config: CrawlConfig
-    thresholds: Thresholds
+    thresholds: Thresholds = field(default_factory=Thresholds)
     technologies: list = field(default_factory=list)  # list[Detection]
 
     @property
@@ -203,9 +219,20 @@ def sample(items: Iterable[str], limit: int = 5) -> str:
     return f"{shown}{f' (+{extra} more)' if extra > 0 else ''}"
 
 
+def page_is_noindex(ctx: "PageContext") -> bool:
+    directives: set[str] = set()
+    if header := ctx.page.header("x-robots-tag"):
+        directives |= parse_directives([header])
+    if ctx.doc is not None:
+        directives |= parse_directives(
+            ctx.doc.meta_all("robots") + ctx.doc.meta_all("googlebot"))
+    return bool(directives & {"noindex", "none"})
+
+
 def run_page_analyzers(ctx: PageContext) -> list[Finding]:
     """Run every registered analyzer. One bad analyzer must not sink the page."""
     findings: list[Finding] = []
+    suppress_appearance = page_is_noindex(ctx)
     active = (
         REGISTRY if ctx.page.error is None
         else [fn for fn in REGISTRY if f"{fn.__module__}.{fn.__name__}" in ERROR_SAFE]
@@ -213,6 +240,11 @@ def run_page_analyzers(ctx: PageContext) -> list[Finding]:
     for fn in active:
         try:
             for finding in fn(ctx):
+                if suppress_appearance and (
+                    finding.id.startswith(APPEARANCE_ONLY)
+                    or finding.id in APPEARANCE_ONLY_IDS
+                ):
+                    continue
                 finding.url = ctx.url
                 findings.append(finding)
         except Exception as exc:  # noqa: BLE001 — a broken check is a bug, not a crash
