@@ -90,6 +90,9 @@ class Crawler:
         # whatever has been collected so far.
         self.should_stop = should_stop
         self._sitemap_urls: set[str] = set()
+        # Normalized final URL -> the first request that landed on it. Several
+        # URLs redirecting to one page is one page, not several.
+        self._arrived: dict[str, str] = {}
         self._renderer: Renderer | None = None
         self._renders_used = 0
         self._probe_globals = self.fingerprinter.js_globals()
@@ -199,6 +202,23 @@ class Crawler:
                        queue: asyncio.Queue) -> None:
         page = await fetcher.fetch(task.url, depth=task.depth, referrer=task.referrer or None)
         page.from_sitemap = task.from_sitemap
+
+        # A redirect onto a page we already fetched is that page again. Analysing
+        # it a second time invents duplicate content out of the site's own
+        # redirects — /en redirecting to / is not two pages with identical text.
+        landed = normalize(page.final_url)
+        # Whichever request reached it first is the page; anything else that
+        # lands here is the same page again, including a request for the final
+        # URL itself that was queued before an earlier redirect resolved to it.
+        first = self._arrived.get(landed)
+        if first is not None:
+            page.duplicate_of = first
+            self.result.pages.append(page)
+            if self.on_page:
+                self.on_page(page, self.frontier)
+            return
+        self._arrived.setdefault(landed, page.final_url)
+        self.frontier.seen.add(landed)
 
         doc = (
             Document(page.html, page.final_url)

@@ -26,12 +26,20 @@ from seochecker.urls import Scope, normalize
 PORT_HOLDER: dict[str, int] = {}
 
 
+# Long enough that duplicate detection can actually fire on it — otherwise a
+# test asserting "these are not reported as duplicates" passes for the wrong
+# reason.
+BODY_TEXT = ("The workshop has cut and finished stone by hand since nineteen eighty seven, "
+             "working granite, marble and quartzite for kitchens and commercial interiors "
+             "across the region. ")
+
+
 def page(title: str, links: list[str] = (), extra: str = "") -> bytes:
     anchors = " ".join(f'<a href="{href}">{href}</a>' for href in links)
     return (
         f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
         f"<title>{title}</title>{extra}</head>"
-        f"<body><h1>{title}</h1>{anchors}</body></html>"
+        f"<body><h1>{title}</h1><p>{BODY_TEXT * 3}</p>{anchors}</body></html>"
     ).encode()
 
 
@@ -88,6 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, page("Home", [
                 "/a", "/b", "/admin/secret", "/a?utm_source=news", "/a#frag",
                 "https://elsewhere.test/x", "/deep/1",
+                "/en", "/old-about", "/fr/about",
             ]))
         # Exact match, not a prefix: the soft-404 probe requests a random hex
         # path, which starts with "a" about one time in sixteen and made this
@@ -109,6 +118,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, page(f"Deep {depth}", [f"/deep/{depth + 1}"]))
         if path == "/moved":
             return self._send(301, b"", extra=[("Location", "/c")])
+        # Two URLs landing on one page, as a language prefix often does.
+        if path == "/en":
+            return self._send(302, b"", extra=[("Location", "/")])
+        if path == "/old-about":
+            return self._send(301, b"", extra=[("Location", "/fr/about")])
+        if path == "/fr/about":
+            return self._send(200, page("About", ["/"]))
         return self._send(404, page("Not found"))
 
 
@@ -183,6 +199,30 @@ class CrawlTests(unittest.TestCase):
         a_pages = [p for p in result.pages if p.requested_url.endswith("/a")]
         self.assertEqual(len(a_pages), 1)
         self.assertEqual(len([h for h in Handler.hits if h.startswith("/a")]), 1)
+
+    def test_a_redirect_onto_a_crawled_page_is_not_a_second_page(self):
+        """/en redirects to /. Analysing both invents duplicate content out of the
+        site's own redirects — which is exactly what it did before this."""
+        result = self.crawl(use_sitemap=False)
+        analysed = [p for p in result.pages if not p.duplicate_of]
+        finals = [p.final_url for p in analysed]
+        self.assertEqual(len(finals), len(set(finals)),
+                         f"the same page was analysed more than once: {finals}")
+        redirected = [p for p in result.pages if p.duplicate_of]
+        self.assertTrue(redirected, "the redirect was not recorded at all")
+
+    def test_the_redirect_is_still_recorded(self):
+        """Collapsing them must not hide the redirect — that is worth knowing."""
+        result = self.crawl(use_sitemap=False)
+        from urllib.parse import urlsplit
+        paths = {urlsplit(p.requested_url).path for p in result.pages}
+        self.assertIn("/en", paths)
+
+    def test_two_urls_landing_on_one_page_are_not_reported_as_duplicates(self):
+        result = self.crawl(use_sitemap=False)
+        ids = {f.id for f in result.site_findings}
+        self.assertNotIn("duplicate.content", ids)
+        self.assertNotIn("duplicate.untranslated_localizations", ids)
 
     # --- limits ------------------------------------------------------------
 

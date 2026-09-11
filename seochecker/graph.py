@@ -37,13 +37,31 @@ class LinkGraph:
 
     @classmethod
     def build(cls, pages: list[Page], root: str) -> "LinkGraph":
-        graph = cls(root=normalize(root))
-        known = {normalize(page.requested_url) for page in pages}
+        # A link is followed to where it actually lands. Without this, a site
+        # whose navigation points at URLs that redirect — a language prefix that
+        # 307s to the unprefixed path, say — looks like a graph of dead ends, and
+        # every real page reads as unreachable.
+        redirects: dict[str, str] = {}
+        for page in pages:
+            requested, final = normalize(page.requested_url), normalize(page.final_url)
+            if requested != final:
+                redirects[requested] = final
+
+        def resolve(url: str) -> str:
+            seen: set[str] = set()
+            while url in redirects and url not in seen:
+                seen.add(url)
+                url = redirects[url]
+            return url
+
+        graph = cls(root=resolve(normalize(root)))
+        known = {resolve(normalize(page.requested_url)) for page in pages}
         graph.nodes = sorted(known)
 
         for page in pages:
-            source = normalize(page.requested_url)
+            source = resolve(normalize(page.final_url))
             for target in page.outlinks:
+                target = resolve(target)
                 # Only edges between pages we actually fetched; a link to a URL
                 # the budget never reached says nothing about its authority.
                 if target in known and target != source:
@@ -126,7 +144,7 @@ class LinkGraph:
     def apply_to(self, pages: list[Page]) -> None:
         """Write the computed metrics back onto the pages."""
         for page in pages:
-            node = normalize(page.requested_url)
+            node = normalize(page.final_url)
             page.pagerank = round(self.pagerank.get(node, 0.0), 6)
             page.click_depth = self.click_depth.get(node)
             page.inlink_count = len(self.incoming.get(node, ()))
