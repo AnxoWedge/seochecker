@@ -198,7 +198,10 @@ class CrawlTests(unittest.TestCase):
         result = self.crawl()
         a_pages = [p for p in result.pages if p.requested_url.endswith("/a")]
         self.assertEqual(len(a_pages), 1)
-        self.assertEqual(len([h for h in Handler.hits if h.startswith("/a")]), 1)
+        # Exact paths only: the soft-404 probe requests a random hex path, which
+        # begins with "a" about one time in sixteen and would be counted here.
+        self.assertEqual(
+            len([h for h in Handler.hits if h == "/a" or h.startswith("/a?")]), 1)
 
     def test_a_redirect_onto_a_crawled_page_is_not_a_second_page(self):
         """/en redirects to /. Analysing both invents duplicate content out of the
