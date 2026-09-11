@@ -29,6 +29,7 @@ def reachability(ctx: SiteContext) -> Iterator[Finding]:
             "structure.orphan_pages",
             f"{len(orphans)} page(s) have no internal links pointing at them",
             evidence=sample(orphans),
+            affected=len(orphans),
             fix="Orphans are reachable only if a crawler already knows the URL. "
                 + (f"{len(from_sitemap)} of them are in the sitemap, which is how they were "
                    "found here — but a sitemap entry is a much weaker signal than a link. "
@@ -43,6 +44,7 @@ def reachability(ctx: SiteContext) -> Iterator[Finding]:
             "structure.deep_pages",
             f"{len(deep)} page(s) are more than {MAX_GOOD_CLICK_DEPTH} clicks from the homepage",
             evidence=sample([f"{url} ({depth} clicks)" for url, depth in deep], 4),
+            affected=len(deep),
             fix="Deep pages are crawled less often and treated as less important. Surface them "
                 "from category pages, navigation, or related-content links.",
         )
@@ -52,6 +54,7 @@ def reachability(ctx: SiteContext) -> Iterator[Finding]:
             "structure.dead_ends",
             f"{len(dead)} page(s) link nowhere else on the site",
             evidence=sample(dead),
+            affected=len(dead),
             fix="A page with no onward internal links ends the crawl path and passes on no "
                 "authority. Add contextual links to related pages.",
         )
@@ -84,6 +87,7 @@ def internal_link_health(ctx: SiteContext) -> Iterator[Finding]:
             "structure.broken_internal_links",
             f"{len(broken)} internal link target(s) are broken",
             evidence=sample(evidence, 4),
+            affected=len({source for sources in broken.values() for source in sources}),
             fix="Fix or remove the links. Broken internal links waste crawl budget and send "
                 "visitors to dead ends.",
         )
@@ -96,6 +100,7 @@ def internal_link_health(ctx: SiteContext) -> Iterator[Finding]:
             "structure.links_to_redirects",
             f"{len(redirecting)} internal link target(s) redirect",
             evidence=sample(evidence, 4),
+            affected=len({source for sources in redirecting.values() for source in sources}),
             fix="Point internal links straight at the destination. Every hop costs crawl "
                 "budget and adds latency for visitors.",
         )
@@ -142,6 +147,7 @@ def crawl_waste(ctx: SiteContext) -> Iterator[Finding]:
             "crawl.parameter_explosion",
             f"{len(exploding)} path(s) were crawled with many different query strings",
             evidence=sample([f"{path} ({len(queries)} variants)" for path, queries in worst], 3),
+            affected=sum(len(queries) for queries in exploding.values()),
             fix="Faceted navigation and filters can generate effectively unlimited URLs. "
                 "Canonicalise the variants to the base page, or disallow the parameters in "
                 "robots.txt, or the crawl budget goes on filter combinations instead of content.",
@@ -197,6 +203,7 @@ def external_link_health(ctx: SiteContext) -> Iterator[Finding]:
             "external.broken_links",
             f"{len(broken)} external link(s) do not resolve",
             evidence=sample(broken, 4),
+            affected=len({page for url in ctx.external_links for page in sources.get(url, [])}),
             fix="Update or remove them. Note that some sites block automated requests, so "
                 "confirm a failure in a browser before deleting a link.",
         )

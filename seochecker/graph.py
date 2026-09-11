@@ -131,6 +131,21 @@ class LinkGraph:
             page.click_depth = self.click_depth.get(node)
             page.inlink_count = len(self.incoming.get(node, ()))
 
+    @property
+    def authority_spread(self) -> float:
+        """Ratio of the highest PageRank to the median.
+
+        A site where every page links to every other — anything with a global
+        navigation and few pages — has a near-uniform PageRank. Reporting that as
+        "where authority sits" is noise, so this says whether there is anything
+        to report.
+        """
+        values = sorted(self.pagerank.values())
+        if len(values) < 3:
+            return 1.0
+        median = values[len(values) // 2]
+        return (values[-1] / median) if median else 1.0
+
     def summary(self) -> dict[str, object]:
         edges = sum(len(targets) for targets in self.outgoing.values())
         return {
@@ -140,6 +155,7 @@ class LinkGraph:
             "unreachable": len(self.unreachable()),
             "dead_ends": len(self.dead_ends()),
             "max_click_depth": max(self.click_depth.values(), default=0),
+            "authority_spread": round(self.authority_spread, 2),
             "top_by_pagerank": [
                 {"url": url, "pagerank": round(score, 6)}
                 for url, score in self.top_by_pagerank()

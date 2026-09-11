@@ -23,7 +23,10 @@ from .fetch import Fetcher
 from .fingerprint import Detection, Fingerprinter, group_by_category
 from .html import Document
 from .models import Finding, Page, Severity
+from .report import RunStore, diff_runs, write_csv, write_html
+from .report.html_out import build_context
 from .robots import product_token
+from .score import Scorecard, evaluated_categories, score
 from .thresholds import Thresholds
 
 MISSING = "[red]— missing —[/red]"
@@ -88,10 +91,27 @@ async def run_crawl(config: CrawlConfig, on_page=None) -> CrawlResult:
     return result
 
 
-def build_crawl_report(config: CrawlConfig, result: CrawlResult) -> dict[str, Any]:
-    all_findings = list(result.site_findings)
+def all_findings(result: CrawlResult) -> list[Finding]:
+    findings = list(result.site_findings)
     for page in result.pages:
-        all_findings.extend(page.findings)
+        findings.extend(page.findings)
+    return findings
+
+
+def scorecard(config: CrawlConfig, result: CrawlResult) -> Scorecard:
+    return score(
+        all_findings(result),
+        pages=len(result.pages),
+        categories=evaluated_categories(
+            crawled=not config.single,
+            rendered=bool(result.stats.get("rendered")),
+            external=bool(result.external_links),
+        ),
+    )
+
+
+def build_crawl_report(config: CrawlConfig, result: CrawlResult,
+                       card: Scorecard | None = None) -> dict[str, Any]:
     return {
         "seochecker": __version__,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -127,7 +147,8 @@ def build_crawl_report(config: CrawlConfig, result: CrawlResult) -> dict[str, An
                 "truncated": result.sitemap.truncated,
             },
         },
-        "summary": summarise(all_findings),
+        "score": card.to_dict() if card else None,
+        "summary": summarise(all_findings(result)),
         "graph": result.graph.summary(),
         "technologies": [tech.to_dict() for tech in result.technologies],
         "site_findings": [_finding_dict(f) for f in result.site_findings],
@@ -292,7 +313,8 @@ def render_human(page: Page, seo: dict[str, Any] | None, technologies: list[Dete
                   f"{stats['bytes_downloaded'] / 1024:.1f} KB, {stats['duration_ms']:.0f}ms[/dim]\n")
 
 
-def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) -> None:
+def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity,
+                 card: Scorecard | None = None) -> None:
     from rich.console import Console
     from rich.table import Table
     from rich.text import Text
@@ -308,6 +330,14 @@ def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) ->
         f"{result.stats.get('bytes_downloaded', 0) / 1_048_576:.1f} MB[/dim]"
     )
     console.print(f"[dim]stopped: {result.stopped_because or 'frontier exhausted'}[/dim]")
+
+    if card:
+        colour = ("green" if card.overall >= 80 else
+                  "yellow" if card.overall >= 60 else "red")
+        weakest = " · ".join(f"{c.category} {c.score:.0f}" for c in card.categories[:3]
+                             if c.score < 100)
+        console.print(f"\n[bold {colour}]Score {card.overall:.0f}/100  (grade {card.grade})"
+                      f"[/bold {colour}]" + (f"  [dim]weakest: {weakest}[/dim]" if weakest else ""))
 
     overview = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
     overview.add_column(style="dim", width=15)
@@ -492,6 +522,55 @@ def _crawl_with_progress(config: CrawlConfig) -> CrawlResult:
         return asyncio.run(run_crawl(config, on_page=on_page))
 
 
+def write_side_reports(config: CrawlConfig, result: CrawlResult,
+                       card: Scorecard) -> list[str]:
+    """HTML, CSV and the run history. Returns lines to show the user."""
+    notes: list[str] = []
+    findings = all_findings(result)
+
+    if config.html:
+        context = build_context(
+            target=config.url,
+            pages=result.pages,
+            site_findings=result.site_findings,
+            score=card,
+            technologies=result.technologies,
+            graph=result.graph.summary() if result.graph.nodes else {},
+            crawl=build_crawl_report(config, result)["crawl"],
+            stats=result.stats,
+            stopped_because=result.stopped_because,
+        )
+        notes.append(f"wrote {write_html(config.html, context)}")
+
+    if config.csv:
+        notes.append(f"wrote {write_csv(config.csv, findings, target=config.url)}")
+
+    if config.db:
+        with RunStore(config.db) as store:
+            store.record(target=config.url, pages=len(result.pages), findings=findings,
+                         score=card.overall, grade=card.grade,
+                         summary=summarise(findings))
+            notes.append(f"recorded run in {config.db}")
+            if config.compare:
+                notes.extend(_compare_lines(diff_runs(store, config.url)))
+    elif config.compare:
+        notes.append("--compare needs --db to have something to compare against")
+    return notes
+
+
+def _compare_lines(diff) -> list[str]:
+    if diff is None:
+        return ["no previous run for this target yet — this one is the baseline"]
+    direction = "+" if diff.score_change >= 0 else ""
+    lines = [f"since {diff.previous.started_at}: score {direction}{diff.score_change:.1f}, "
+             f"{len(diff.introduced)} new, {len(diff.resolved)} resolved"]
+    for severity, finding_id, url in diff.introduced[:5]:
+        lines.append(f"  new       {severity:8} {finding_id} {url}")
+    for severity, finding_id, url in diff.resolved[:5]:
+        lines.append(f"  resolved  {severity:8} {finding_id} {url}")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     config = config_from_args(argv)
 
@@ -501,10 +580,13 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("interrupted", file=sys.stderr)
             return 130
-        _write(json.dumps(build_crawl_report(config, result), indent=2, ensure_ascii=False),
-               config)
+        card = scorecard(config, result)
+        _write(json.dumps(build_crawl_report(config, result, card), indent=2,
+                          ensure_ascii=False), config)
+        for note in write_side_reports(config, result, card):
+            print(note, file=sys.stderr)
         if not config.quiet:
-            render_crawl(result, config, Severity(config.min_severity))
+            render_crawl(result, config, Severity(config.min_severity), card)
         return crawl_exit_code(result, config.fail_on)
 
     try:

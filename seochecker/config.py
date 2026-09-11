@@ -83,6 +83,10 @@ class CrawlConfig:
     include_html: bool = False
     include_links: bool = False
     min_severity: str = "info"
+    html: str | None = None
+    csv: str | None = None
+    db: str | None = None
+    compare: bool = False
     fail_on: str = "never"
     quiet: bool = False
     verbose: bool = False
@@ -195,6 +199,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="write the JSON report here instead of stdout")
     out.add_argument("--include-html", action="store_true",
                      help="keep raw HTML in the JSON output (large)")
+    out.add_argument("--html", default=None, metavar="PATH",
+                     help="write a self-contained HTML report here")
+    out.add_argument("--csv", default=None, metavar="PATH",
+                     help="write one CSV row per finding here")
+    out.add_argument("--db", default=None, metavar="PATH",
+                     help="record this run in a SQLite file, for comparing over time")
+    out.add_argument("--compare", action="store_true",
+                     help="with --db, report what changed since the previous run")
     out.add_argument("--include-links", action="store_true",
                      help="keep the per-page link lists in the JSON output (large)")
     out.add_argument("--min-severity", choices=["critical", "warning", "notice", "info"],
@@ -246,6 +258,10 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         include_html=args.include_html,
         include_links=args.include_links,
         min_severity=args.min_severity,
+        html=args.html,
+        csv=args.csv,
+        db=args.db,
+        compare=args.compare,
         fail_on=args.fail_on,
         quiet=args.quiet,
         verbose=args.verbose,

@@ -94,6 +94,7 @@ def duplicate_metadata(ctx: SiteContext) -> Iterator[Finding]:
                 f"{affected} pages share {len(groups)} duplicated {label}",
                 evidence=_describe(groups),
                 fix=fix,
+                affected=affected,
             )
 
 
@@ -115,6 +116,7 @@ def duplicate_content(ctx: SiteContext) -> Iterator[Finding]:
             "duplicate.content",
             f"{sum(len(f) for f in duplicated.values())} pages have identical body content",
             evidence=sample(pairs, 3),
+            affected=sum(len(f) for f in duplicated.values()),
             fix="Consolidate them, or point the duplicates at one canonical URL. Identical "
                 "pages split whatever authority each of them earns.",
         )
@@ -132,10 +134,13 @@ def duplicate_content(ctx: SiteContext) -> Iterator[Finding]:
         if score >= threshold:
             near.append(f"{left_url} ~ {right_url} ({score:.0%} identical)")
     if near:
+        involved = {url for pair in near for url in pair.split(" ~ ")[0:1]} | {
+            pair.split(" ~ ")[1].split(" (")[0] for pair in near}
         yield warning(
             "duplicate.near_content",
             f"{len(near)} pair(s) of pages are near-identical",
             evidence=sample(near, 3),
+            affected=len(involved),
             fix="Usually paginated archives, filtered listings, or templated pages with only "
                 "a name or price changing. Add distinguishing content, or canonicalise them "
                 "to one page.",

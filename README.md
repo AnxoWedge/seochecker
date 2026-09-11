@@ -12,10 +12,10 @@ python3 -m venv venv
 
 ## Usage
 
-Crawl a site:
+Crawl a site and produce a report you can send to someone:
 
 ```bash
-./venv/bin/python seocheck.py example.com -o out/report.json
+./venv/bin/python seocheck.py example.com --html out/report.html -o out/report.json
 ```
 
 Or audit a single page:
@@ -63,6 +63,47 @@ pipe the report while still watching the run:
 
 Exit code is `0` on success, `1` when the fetch failed or `--fail-on` is triggered —
 so it can gate CI.
+
+## Reports
+
+`--html` writes a single self-contained file: no CDN, no web fonts, no network.
+It opens from `file://`, from an email attachment, and on a laptop with no
+internet, which is how it will actually be read. Light and dark, prints cleanly,
+and the tables sort and filter in place.
+
+It contains the score and its breakdown, counts by severity, the technology
+stack, crawl and link-graph summaries, every site-wide finding, page findings
+grouped by issue rather than repeated per page, and a sortable table of every URL
+with its status, click depth, inbound links and internal PageRank.
+
+`--db` records each run in SQLite and `--compare` diffs the last two — what broke,
+what got fixed, and how the score moved.
+
+### The score
+
+A heuristic, and built to be argued with: each area starts at 100 and every
+distinct finding deducts according to its severity and the **share of the site it
+affects**, so a critical issue on one page in a hundred barely registers while the
+same issue everywhere is devastating. The report shows the deduction behind every
+number.
+
+The first version of this model was wrong in a way worth recording: it averaged
+the per-area scores, so a site with every page set to `noindex` — completely
+invisible to search — scored **94.8 out of 100**, because seventeen clean areas
+drowned the one catastrophic one. The overall is now computed from the findings
+directly, with weights fitted against a table of stated expectations:
+
+| Site | Score |
+| --- | --- |
+| No findings | 100 |
+| Every page `noindex` | 0 |
+| One critical on 1 page in 100 | 99 |
+| One critical on every page | 10 |
+| One warning on every page | 85 |
+| All internal links broken | 33 |
+
+For reference, measured: wordpress.org scores 72, mozilla.org 70, and a
+well-built single page (MDN) 86.
 
 ## JavaScript rendering
 
@@ -268,6 +309,11 @@ seochecker/
   graph.py               internal link graph: PageRank, click depth, orphans
   similarity.py          MinHash sketches for near-duplicate detection
   render.py              headless rendering and the decision of when to use it
+  score.py               the scoring model, and the calibration behind it
+  report/
+    html_out.py          self-contained HTML report
+    template.html.j2     its markup, styles and interactions
+    csv_out.py store.py  CSV export and the SQLite run history
   fingerprint/
     rules.yaml           68 technologies, 136 signals — data, not code
     detect.py            rules engine, confidence scoring, implications
@@ -282,4 +328,5 @@ tests/test_fingerprint.py rules engine, confidence, implications
 tests/test_crawl.py       scope, dedup, robots, sitemap, limits
 tests/test_sitewide.py    duplicates, link graph, soft 404s, external links
 tests/test_render.py      the render heuristic, and rendering end to end
+tests/test_report.py      the scoring calibration table, and the report writers
 ```

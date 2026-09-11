@@ -45,6 +45,10 @@ class Finding:
     evidence: str = ""
     fix: str = ""
     url: str | None = None
+    # For site-level findings: how many pages this actually concerns. 0 means the
+    # whole site. Without it, "one pair of pages is near-identical" would be
+    # scored as a problem affecting every page.
+    affected: int = 0
 
 
 @dataclass(slots=True)

@@ -138,6 +138,7 @@ def sitemap_entries(ctx: SiteContext) -> Iterator[Finding]:
             "sitemap.broken_entries",
             f"{len(broken)} sitemap URL(s) do not resolve",
             evidence=sample(broken),
+            affected=len(broken),
             fix="A sitemap is a list of pages you are asking to be indexed. Dead entries waste "
                 "crawl budget and reduce trust in the whole file.",
         )
@@ -146,6 +147,7 @@ def sitemap_entries(ctx: SiteContext) -> Iterator[Finding]:
             "sitemap.redirecting_entries",
             f"{len(redirected)} sitemap URL(s) redirect",
             evidence=sample(redirected),
+            affected=len(redirected),
             fix="List the destination URL directly. A sitemap should contain final URLs.",
         )
     if noindexed:
@@ -153,6 +155,7 @@ def sitemap_entries(ctx: SiteContext) -> Iterator[Finding]:
             "sitemap.noindexed_entries",
             f"{len(noindexed)} sitemap URL(s) are set to noindex",
             evidence=sample(noindexed),
+            affected=len(noindexed),
             fix="Contradictory signals: the sitemap asks for indexing while the page refuses "
                 "it. Remove them from the sitemap, or remove the noindex.",
         )
@@ -161,6 +164,7 @@ def sitemap_entries(ctx: SiteContext) -> Iterator[Finding]:
             "sitemap.non_canonical_entries",
             f"{len(non_canonical)} sitemap URL(s) canonicalise elsewhere",
             evidence=sample(non_canonical),
+            affected=len(non_canonical),
             fix="List canonical URLs only, or the sitemap is nominating pages that point away "
                 "from themselves.",
         )

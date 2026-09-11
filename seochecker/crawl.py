@@ -25,7 +25,7 @@ from .html import Document
 from .models import Finding, Page
 from .render import Renderer, playwright_available, should_render
 from .robots import RobotsTxt, parse as parse_robots, product_token
-from .similarity import content_hash, sketch
+from .similarity import content_hash, near_duplicate, sketch
 from .sitemap import SitemapSet, load_sitemaps
 from .thresholds import Thresholds
 from .urls import Scope, normalize
@@ -121,17 +121,30 @@ class Crawler:
         fetcher.host_delay[host] = max(self.config.delay, declared)
 
     async def _probe_soft_404(self, fetcher: Fetcher) -> tuple[int, ...]:
-        """Ask for a URL that cannot exist, and fingerprint whatever comes back.
+        """Ask for two URLs that cannot exist, and fingerprint what comes back.
 
-        A correct site answers 404 and there is nothing to do. A site that
-        answers 200 has soft 404s, and this fingerprint identifies them.
+        A correct site answers 404 and there is nothing to report. A site that
+        answers 200 has soft 404s.
+
+        Two probes, not one: a single 200 can be a rate-limit page or a transient
+        edge error, which was observed misreporting wordpress.org as having soft
+        404s. Requiring two *different* nonsense URLs to return near-identical
+        pages is conclusive — that is what a generic not-found handler looks like
+        — and costs one extra request per crawl.
         """
         origin = f"{urlsplit(self.config.url).scheme}://{urlsplit(self.config.url).netloc}"
-        probe = f"{origin}/{secrets.token_hex(12)}-seocheck-probe"
-        page = await fetcher.fetch(probe)
-        if page.error is not None or not page.ok or not page.html:
+        sketches: list[tuple[int, ...]] = []
+        for _ in range(2):
+            probe = f"{origin}/{secrets.token_hex(12)}-seocheck-probe"
+            page = await fetcher.fetch(probe)
+            if page.error is not None or not page.ok or not page.html:
+                return ()
+            sketches.append(sketch(Document(page.html, page.final_url).text))
+
+        first, second = sketches
+        if not first or not second or not near_duplicate(first, second):
             return ()
-        return sketch(Document(page.html, page.final_url).text)
+        return first
 
     async def _discover_sitemaps(self, fetcher: Fetcher) -> SitemapSet:
         seeds = list(self.result.robots.sitemaps)

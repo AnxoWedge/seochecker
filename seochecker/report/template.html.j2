@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEO report — {{ host }}</title>
+<style>
+:root{
+  --bg:#fbfbfa; --surface:#fff; --border:#e4e2dd; --text:#1f1e1c; --muted:#6b6862;
+  --accent:#2f6f4e; --critical:#b4231f; --warning:#a56a00; --notice:#1d5f8a; --info:#5b5a57;
+  --bar:#ece9e3; --shadow:0 1px 2px rgba(0,0,0,.05), 0 1px 8px rgba(0,0,0,.03);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#16171a; --surface:#1d1f23; --border:#2e3137; --text:#e8e6e3; --muted:#9a9793;
+    --accent:#63b98a; --critical:#f0736c; --warning:#e0a442; --notice:#65aede; --info:#9a9793;
+    --bar:#2a2d33; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1140px;margin:0 auto;padding:32px 24px 64px}
+h1,h2,h3{line-height:1.25;margin:0}
+h1{font-size:22px;font-weight:650;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:650;margin:36px 0 12px;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--muted);font-size:12px}
+a{color:inherit}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+
+header{display:flex;flex-wrap:wrap;gap:24px;align-items:center;justify-content:space-between;
+  padding-bottom:24px;border-bottom:1px solid var(--border)}
+.target{font-size:20px;font-weight:600;word-break:break-all}
+.meta{color:var(--muted);font-size:13px;margin-top:4px}
+.scorebox{display:flex;align-items:center;gap:14px}
+.score{font-size:44px;font-weight:700;line-height:1;letter-spacing:-.03em}
+.grade{font-size:13px;font-weight:650;padding:4px 10px;border-radius:999px;
+  background:var(--bar);color:var(--muted)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:20px 0 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;box-shadow:var(--shadow)}
+.card .n{font-size:24px;font-weight:650;letter-spacing:-.02em}
+.card .l{color:var(--muted);font-size:12px;margin-top:2px}
+.c-critical{color:var(--critical)} .c-warning{color:var(--warning)}
+.c-notice{color:var(--notice)} .c-info{color:var(--info)}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+thead th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;
+  padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+th[data-sort]{cursor:pointer;user-select:none}
+th[data-sort]:hover{color:var(--text)}
+th[data-sort]::after{content:"";opacity:.35;margin-left:5px}
+th[data-sort].asc::after{content:"\2191";opacity:1}
+th[data-sort].desc::after{content:"\2193";opacity:1}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  overflow:hidden;box-shadow:var(--shadow)}
+.panel .inner{padding:4px 6px}
+
+.bar{height:6px;border-radius:3px;background:var(--bar);overflow:hidden;min-width:70px}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.bar.low i{background:var(--critical)} .bar.mid i{background:var(--warning)}
+
+.sev{display:inline-block;font-size:11px;font-weight:650;letter-spacing:.03em;
+  padding:2px 7px;border-radius:5px;text-transform:uppercase;white-space:nowrap}
+.sev.critical{background:color-mix(in srgb,var(--critical) 14%,transparent);color:var(--critical)}
+.sev.warning{background:color-mix(in srgb,var(--warning) 16%,transparent);color:var(--warning)}
+.sev.notice{background:color-mix(in srgb,var(--notice) 14%,transparent);color:var(--notice)}
+.sev.info{background:var(--bar);color:var(--info)}
+
+details.finding{border-bottom:1px solid var(--border)}
+details.finding:last-child{border-bottom:0}
+details.finding>summary{display:grid;grid-template-columns:78px 1fr auto;gap:12px;
+  align-items:baseline;padding:11px 14px;cursor:pointer;list-style:none}
+details.finding>summary::-webkit-details-marker{display:none}
+details.finding>summary:hover{background:var(--bar)}
+.fid{font-weight:600}
+.fmsg{color:var(--muted);font-size:13px;margin-top:2px}
+.count{color:var(--muted);font-size:12px;white-space:nowrap}
+.body{padding:2px 14px 16px 104px}
+.fix{border-left:2px solid var(--accent);padding:2px 0 2px 12px;margin:10px 0;
+  color:var(--muted);font-size:13.5px}
+.ev{background:var(--bar);border-radius:6px;padding:8px 10px;margin:8px 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  white-space:pre-wrap;word-break:break-word;color:var(--muted)}
+.urls{margin:8px 0 0;padding:0;list-style:none;font-size:12.5px}
+.urls li{padding:2px 0;word-break:break-all}
+.urls a{color:var(--notice);text-decoration:none}
+.urls a:hover{text-decoration:underline}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--bar);color:var(--muted)}
+.chip b{color:var(--text);font-weight:600}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.filters button{font:inherit;font-size:12px;padding:4px 11px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer}
+.filters button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.empty{color:var(--muted);padding:16px 14px;font-size:13.5px}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
+  color:var(--muted);font-size:12px}
+@media print{
+  body{background:#fff}
+  .filters,th[data-sort]{display:none}
+  details.finding{break-inside:avoid}
+  details.finding>summary{cursor:default}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>SEO report</h1>
+    <div class="target">{{ target }}</div>
+    <div class="meta">{{ generated_at }} · {{ pages|length }} page{{ '' if pages|length == 1 else 's' }} crawled
+      {%- if stats.duration_ms %} in {{ '%.1f'|format(stats.duration_ms / 1000) }}s{% endif %}
+      {%- if stopped_because %} · {{ stopped_because }}{% endif %}</div>
+  </div>
+  {% if score %}
+  <div class="scorebox">
+    <div class="score">{{ score.overall|round|int }}</div>
+    <div>
+      <div class="grade">Grade {{ score.grade }}</div>
+      <div class="meta" style="margin-top:6px">out of 100</div>
+    </div>
+  </div>
+  {% endif %}
+</header>
+
+<div class="cards">
+  <div class="card"><div class="n c-critical">{{ counts.critical }}</div><div class="l">critical</div></div>
+  <div class="card"><div class="n c-warning">{{ counts.warning }}</div><div class="l">warnings</div></div>
+  <div class="card"><div class="n c-notice">{{ counts.notice }}</div><div class="l">notices</div></div>
+  <div class="card"><div class="n">{{ ok_pages }}/{{ pages|length }}</div><div class="l">returned 200</div></div>
+  {% if graph and graph.nodes %}
+  <div class="card"><div class="n">{{ graph.edges }}</div><div class="l">internal links</div></div>
+  <div class="card"><div class="n{{ ' c-warning' if graph.orphans else '' }}">{{ graph.orphans }}</div><div class="l">orphan pages</div></div>
+  {% endif %}
+</div>
+
+{% if score %}
+<h2>Scores by area</h2>
+<div class="panel"><div class="inner"><table>
+  <thead><tr><th>Area</th><th style="width:180px">Score</th><th>Biggest deduction</th><th style="text-align:right">Issues</th></tr></thead>
+  <tbody>
+  {% for c in score.categories %}
+    <tr>
+      <td><b>{{ c.category }}</b></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:9px">
+          <div class="bar {{ 'low' if c.score < 50 else ('mid' if c.score < 80 else '') }}">
+            <i style="width:{{ c.score|round|int }}%"></i></div>
+          <span class="mono">{{ c.score|round|int }}</span>
+        </div>
+      </td>
+      <td class="mono" style="color:var(--muted)">
+        {%- if c.deductions -%}
+          {{ c.deductions[0].finding_id }} <span style="opacity:.7">(&minus;{{ c.deductions[0].overall_points|round(1) }})</span>
+        {%- else -%}<span style="opacity:.6">none</span>{%- endif -%}
+      </td>
+      <td style="text-align:right;color:var(--muted)">{{ c.deductions|length }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endif %}
+
+{% if technologies %}
+<h2>Technology</h2>
+<div class="panel"><div class="inner" style="padding:14px">
+  <div class="chips">
+  {% for t in technologies %}
+    <span class="chip" title="{{ t.evidence|join(' · ') }}">{{ t.category }}: <b>{{ t.name }}{% if t.version %} {{ t.version }}{% endif %}</b>
+      {{ (t.confidence * 100)|round|int }}%{% if t.implied_by %} · inferred{% endif %}</span>
+  {% endfor %}
+  </div>
+</div></div>
+{% endif %}
+
+{% if crawl %}
+<h2>Crawl</h2>
+<div class="panel"><div class="inner"><table>
+  <tbody>
+    <tr><td style="width:180px;color:var(--muted)">robots.txt</td><td class="mono">
+      {{ 'found' if crawl.robots.fetched else (crawl.robots.error or crawl.robots.status or 'not found') }}
+      {%- if crawl.robots.sitemaps %} · {{ crawl.robots.sitemaps|length }} sitemap(s) declared{% endif %}</td></tr>
+    <tr><td style="color:var(--muted)">sitemap</td><td class="mono">
+      {% if crawl.sitemap.files %}{{ crawl.sitemap.urls }} URLs across {{ crawl.sitemap.files|length }} file(s)
+      {%- else %}none found{% endif %}</td></tr>
+    {% if graph and graph.nodes %}
+    <tr><td style="color:var(--muted)">link graph</td><td class="mono">{{ graph.nodes }} pages ·
+      {{ graph.edges }} links · deepest {{ graph.max_click_depth }} click{{ '' if graph.max_click_depth == 1 else 's' }} from home</td></tr>
+    {% endif %}
+    {% if stats.rendered %}
+    <tr><td style="color:var(--muted)">rendering</td><td class="mono">{{ stats.rendered }} page(s) rendered</td></tr>
+    {% endif %}
+    {% if crawl.frontier.skipped %}
+    <tr><td style="color:var(--muted)">skipped</td><td class="mono">
+      {% for why, n in crawl.frontier.skipped.items() %}{{ n }} {{ why }}{{ ' · ' if not loop.last }}{% endfor %}</td></tr>
+    {% endif %}
+  </tbody>
+</table></div></div>
+{% endif %}
+
+{% if graph and graph.top_by_pagerank and graph.authority_spread >= 1.25 %}
+<h2>Where internal authority sits</h2>
+<div class="panel"><div class="inner"><table>
+  <thead><tr><th>Page</th><th style="width:200px">Internal PageRank</th></tr></thead>
+  <tbody>
+  {% for row in graph.top_by_pagerank[:8] %}
+    <tr>
+      <td class="mono"><a href="{{ row.url }}">{{ row.url|short }}</a></td>
+      <td><div style="display:flex;align-items:center;gap:9px">
+        <div class="bar"><i style="width:{{ (row.pagerank / graph.top_by_pagerank[0].pagerank * 100)|round|int }}%"></i></div>
+        <span class="mono">{{ (row.pagerank * 100)|round(1) }}%</span></div></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% elif graph and graph.nodes and graph.authority_spread < 1.25 %}
+<h2>Where internal authority sits</h2>
+<div class="panel"><div class="empty">Internal authority is spread evenly across all
+{{ graph.nodes }} pages — every page links to most of the others, so no page is
+meaningfully more prominent than another in the internal link graph.</div></div>
+{% endif %}
+
+{% if site_findings %}
+<h2>Site-wide findings</h2>
+<div class="panel">
+{% for f in site_findings %}
+  <details class="finding" {{ 'open' if f.severity in ('critical', 'warning') }}>
+    <summary>
+      <span class="sev {{ f.severity }}">{{ f.severity }}</span>
+      <span><span class="fid mono">{{ f.id }}</span><div class="fmsg">{{ f.message }}</div></span>
+      <span class="count"></span>
+    </summary>
+    <div class="body">
+      {% if f.evidence %}<div class="ev">{{ f.evidence }}</div>{% endif %}
+      {% if f.fix %}<div class="fix">{{ f.fix }}</div>{% endif %}
+    </div>
+  </details>
+{% endfor %}
+</div>
+{% endif %}
+
+{% if grouped %}
+<h2>Page findings</h2>
+<div class="filters" id="sevfilter">
+  <button class="on" data-sev="all">All</button>
+  <button data-sev="critical">Critical</button>
+  <button data-sev="warning">Warning</button>
+  <button data-sev="notice">Notice</button>
+  <button data-sev="info">Info</button>
+</div>
+<div class="panel" id="groups">
+{% for g in grouped %}
+  <details class="finding" data-sev="{{ g.severity }}" {{ 'open' if g.severity == 'critical' }}>
+    <summary>
+      <span class="sev {{ g.severity }}">{{ g.severity }}</span>
+      <span><span class="fid mono">{{ g.id }}</span><div class="fmsg">{{ g.message }}</div></span>
+      <span class="count">{{ g.urls|length }} page{{ '' if g.urls|length == 1 else 's' }}</span>
+    </summary>
+    <div class="body">
+      {% if g.evidence %}<div class="ev">{{ g.evidence }}</div>{% endif %}
+      {% if g.fix %}<div class="fix">{{ g.fix }}</div>{% endif %}
+      <ul class="urls">
+        {% for u in g.urls[:25] %}<li><a href="{{ u }}">{{ u|short }}</a></li>{% endfor %}
+        {% if g.urls|length > 25 %}<li style="color:var(--muted)">… and {{ g.urls|length - 25 }} more</li>{% endif %}
+      </ul>
+    </div>
+  </details>
+{% endfor %}
+</div>
+{% endif %}
+
+<h2>Pages</h2>
+<div class="panel"><div class="inner"><table id="pages">
+  <thead><tr>
+    <th data-sort="text">URL</th>
+    <th data-sort="num" style="width:70px">Status</th>
+    <th data-sort="num" style="width:70px">Depth</th>
+    <th data-sort="num" style="width:90px">Words</th>
+    <th data-sort="num" style="width:90px">Links in</th>
+    <th data-sort="num" style="width:110px">PageRank</th>
+    <th data-sort="num" style="width:80px">Issues</th>
+  </tr></thead>
+  <tbody>
+  {% for p in pages %}
+    <tr>
+      <td class="mono"><a href="{{ p.final_url }}">{{ p.final_url|short }}</a></td>
+      <td class="{{ 'c-critical' if not p.ok }}">{{ p.status or (p.error or '—') }}</td>
+      <td>{{ p.click_depth if p.click_depth is not none else '—' }}</td>
+      <td>{{ (p.seo.word_count if p.seo else 0) or '—' }}</td>
+      <td>{{ p.inlink_count }}</td>
+      <td>{{ (p.pagerank * 100)|round(2) }}%</td>
+      <td class="{{ 'c-critical' if p.critical else ('c-warning' if p.warning else '') }}">{{ p.findings|length }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+
+<footer>
+  Generated by seochecker {{ version }} · {{ generated_at }}<br>
+  Scores are a heuristic: each area starts at 100 and every distinct finding deducts
+  according to its severity and the share of the site it affects. The deduction behind
+  each number is shown above.
+</footer>
+</div>
+
+<script>
+(function(){
+  // Sortable page table.
+  var table = document.getElementById('pages');
+  if (table) {
+    table.querySelectorAll('th[data-sort]').forEach(function(th, index){
+      th.addEventListener('click', function(){
+        var body = table.tBodies[0];
+        var rows = Array.prototype.slice.call(body.rows);
+        var desc = !th.classList.contains('desc');
+        table.querySelectorAll('th').forEach(function(o){ o.classList.remove('asc','desc'); });
+        th.classList.add(desc ? 'desc' : 'asc');
+        var numeric = th.dataset.sort === 'num';
+        rows.sort(function(a, b){
+          var x = a.cells[index].textContent.trim(), y = b.cells[index].textContent.trim();
+          if (numeric) {
+            var nx = parseFloat(x.replace('%','')), ny = parseFloat(y.replace('%',''));
+            nx = isNaN(nx) ? -1 : nx; ny = isNaN(ny) ? -1 : ny;
+            return desc ? ny - nx : nx - ny;
+          }
+          return desc ? y.localeCompare(x) : x.localeCompare(y);
+        });
+        rows.forEach(function(r){ body.appendChild(r); });
+      });
+    });
+  }
+  // Severity filter for the grouped findings.
+  var filter = document.getElementById('sevfilter');
+  if (filter) {
+    filter.addEventListener('click', function(event){
+      var button = event.target.closest('button');
+      if (!button) return;
+      filter.querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); });
+      button.classList.add('on');
+      var want = button.dataset.sev;
+      document.querySelectorAll('#groups details').forEach(function(d){
+        d.hidden = !(want === 'all' || d.dataset.sev === want);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

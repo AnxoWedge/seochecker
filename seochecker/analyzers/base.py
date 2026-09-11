@@ -139,7 +139,8 @@ class PageContext:
 # `id` is stable and machine-readable (`title.too_long`); `message` is what a
 # human reads; `fix` is what they should do about it.
 
-def _make(severity: Severity, id: str, message: str, evidence: str, fix: str) -> Finding:
+def _make(severity: Severity, id: str, message: str, evidence: str, fix: str,
+          affected: int = 0) -> Finding:
     return Finding(
         id=id,
         severity=severity,
@@ -147,23 +148,28 @@ def _make(severity: Severity, id: str, message: str, evidence: str, fix: str) ->
         message=message,
         evidence=evidence,
         fix=fix,
+        affected=affected,
     )
 
 
-def critical(id: str, message: str, *, evidence: str = "", fix: str = "") -> Finding:
-    return _make(Severity.CRITICAL, id, message, evidence, fix)
+def critical(id: str, message: str, *, evidence: str = "", fix: str = "",
+             affected: int = 0) -> Finding:
+    return _make(Severity.CRITICAL, id, message, evidence, fix, affected)
 
 
-def warning(id: str, message: str, *, evidence: str = "", fix: str = "") -> Finding:
-    return _make(Severity.WARNING, id, message, evidence, fix)
+def warning(id: str, message: str, *, evidence: str = "", fix: str = "",
+            affected: int = 0) -> Finding:
+    return _make(Severity.WARNING, id, message, evidence, fix, affected)
 
 
-def notice(id: str, message: str, *, evidence: str = "", fix: str = "") -> Finding:
-    return _make(Severity.NOTICE, id, message, evidence, fix)
+def notice(id: str, message: str, *, evidence: str = "", fix: str = "",
+           affected: int = 0) -> Finding:
+    return _make(Severity.NOTICE, id, message, evidence, fix, affected)
 
 
-def info(id: str, message: str, *, evidence: str = "", fix: str = "") -> Finding:
-    return _make(Severity.INFO, id, message, evidence, fix)
+def info(id: str, message: str, *, evidence: str = "", fix: str = "",
+         affected: int = 0) -> Finding:
+    return _make(Severity.INFO, id, message, evidence, fix, affected)
 
 
 def site_analyzer(fn: "SiteAnalyzer") -> "SiteAnalyzer":
