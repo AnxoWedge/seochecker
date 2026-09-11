@@ -204,6 +204,33 @@ class FetchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kind, ErrorKind.TLS)
         self.assertIn("expired", detail)
 
+    async def test_transient_ssl_conditions_are_retryable_not_certificate_errors(self):
+        """SSLWantReadError is a non-blocking socket condition, not a bad certificate.
+
+        Seen live on wordpress.org: two pages were reported as TLS failures, which
+        skipped the retry that would have fixed them and told the user their
+        certificate could not be verified.
+        """
+        import ssl
+        from seochecker.fetch import RETRYABLE_KINDS
+
+        for inner, expected in (
+            (ssl.SSLWantReadError("did not complete"), ErrorKind.CONNECTION),
+            (ssl.SSLEOFError("EOF occurred"), ErrorKind.CONNECTION),
+            (ssl.SSLCertVerificationError("certificate has expired"), ErrorKind.TLS),
+        ):
+            with self.subTest(error=type(inner).__name__):
+                try:
+                    raise inner
+                except ssl.SSLError as cause:
+                    try:
+                        raise httpx.ConnectError("failed") from cause
+                    except httpx.ConnectError as outer:
+                        kind, _ = classify_exception(outer)
+                self.assertEqual(kind, expected)
+        self.assertIn(ErrorKind.CONNECTION, RETRYABLE_KINDS)
+        self.assertNotIn(ErrorKind.TLS, RETRYABLE_KINDS)
+
     async def test_bot_mitigation_is_reported(self):
         page = await self.get("/blocked", max_retries=0)
         self.assertEqual(page.error, ErrorKind.BLOCKED)

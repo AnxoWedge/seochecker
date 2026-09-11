@@ -64,6 +64,9 @@ class CrawlConfig:
     max_retries: int = 2
     max_redirects: int = 10
     max_bytes: int = 5_000_000   # stop reading a body past this
+    max_blocks: int = 5          # consecutive blocks before giving up on a host
+    cache: str | None = None     # path to an on-disk response cache
+    cache_ttl: float = 3600.0    # seconds a cached response is served unrevalidated
 
     # --- transport ----------------------------------------------------------
     user_agent: str = BOT_UA
@@ -167,6 +170,13 @@ def build_parser() -> argparse.ArgumentParser:
     pol.add_argument("--retries", dest="max_retries", type=int, default=2)
     pol.add_argument("--max-redirects", type=int, default=10)
     pol.add_argument("--max-bytes", type=int, default=5_000_000)
+    pol.add_argument("--max-blocks", type=int, default=5, metavar="N",
+                     help="stop asking a host after this many consecutive blocks")
+    pol.add_argument("--cache", default=None, metavar="PATH",
+                     help="on-disk response cache; makes re-running an audit nearly "
+                          "free for the site being audited")
+    pol.add_argument("--cache-ttl", type=float, default=3600.0, metavar="SECONDS",
+                     help="how long a cached response is used without revalidating")
 
     net = p.add_argument_group("transport")
     net.add_argument("--user-agent", default=None,
@@ -245,6 +255,9 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         max_retries=args.max_retries,
         max_redirects=args.max_redirects,
         max_bytes=args.max_bytes,
+        max_blocks=args.max_blocks,
+        cache=args.cache,
+        cache_ttl=args.cache_ttl,
         user_agent=ua,
         accept_language=args.accept_language,
         extra_headers=dict(args.extra_headers),

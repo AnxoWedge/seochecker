@@ -51,6 +51,9 @@ pipe the report while still watching the run:
 | `--delay 1.0` | Minimum seconds between requests to one host |
 | `--timeout 30` | Per-request timeout |
 | `--retries 3` | Retries on timeouts, connection errors and 429/5xx |
+| `--cache PATH` | On-disk response cache — makes re-running an audit nearly free for the site |
+| `--cache-ttl 3600` | How long a cached response is used before revalidating |
+| `--max-blocks 5` | Stop asking a host after this many consecutive blocks |
 | `--user-agent browser` | Use a browser UA instead of the honest bot UA |
 | `-H 'Name: value'` | Extra request header (repeatable) |
 | `--cookie name=value` | Send a cookie (repeatable) — for gated sites you own |
@@ -136,6 +139,34 @@ When a page is rendered, the crawler:
   served HTML
 
 Rendering costs roughly 1-10 seconds per page, hence `--max-render`.
+
+## Not getting blocked
+
+The aim is to behave so a site never needs to block us — not to defeat bot
+protection. There is no CAPTCHA solving and no WAF evasion here. When a site does
+block us, that is reported as a finding rather than worked around.
+
+- **Pacing adapts to the host.** A fixed delay is either too slow for a healthy
+  server or too fast for a struggling one. Each host starts at the configured
+  delay and adjusts: hard backoff on 429/503, gentler on errors and on rising
+  latency, and a deliberately slow return toward the base once it is answering
+  normally. `Retry-After` is honoured, and a `Crawl-delay` in robots.txt can only
+  ever slow the crawl down.
+- **A circuit breaker stops the crawl.** After five consecutive blocks from a
+  host, seochecker stops asking and reports why. Measured against a server that
+  rate-limits everything: with 41 discoverable URLs, it sent **5 requests** and
+  refused the rest locally.
+- **The cache is a politeness feature.** With `--cache`, a fresh entry is served
+  with no request at all and a stale one is revalidated with `If-None-Match`,
+  which the server answers with a bodiless 304. Measured on a 17-page site: a
+  second run took **1 request instead of 20**, and forcing revalidation turned 18
+  of 20 into 304s.
+- **Interrupted crawls restart cheaply.** There is no separate resume checkpoint,
+  deliberately — with the cache on, re-running a crawl that stopped at page 400
+  replays those from disk and only fetches what is new.
+
+For sites you own, `-H 'Name: value'` and `--cookie name=value` get past a login,
+`--proxy` routes elsewhere, and `--ignore-robots` exists but is off by default.
 
 ## How it crawls
 

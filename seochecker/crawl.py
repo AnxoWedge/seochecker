@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 from .analyzers import PageContext, run_page_analyzers
+from .cache import ResponseCache
 from .config import CrawlConfig
 from .fetch import Fetcher
 from .frontier import Frontier, Task
@@ -54,6 +55,7 @@ class CrawlResult:
     site_findings: list[Finding] = field(default_factory=list)
     robots: RobotsTxt = field(default_factory=RobotsTxt)
     sitemap: SitemapSet = field(default_factory=SitemapSet)
+    blocked_hosts: dict[str, str] = field(default_factory=dict)
     graph: LinkGraph = field(default_factory=LinkGraph)
     soft_404_fingerprint: tuple = ()
     external_links: dict = field(default_factory=dict)
@@ -118,7 +120,7 @@ class Crawler:
             return
         host = urlsplit(self.config.url).netloc
         # Never speed up because robots.txt permits it — only ever slow down.
-        fetcher.host_delay[host] = max(self.config.delay, declared)
+        fetcher.health(host).set_base(declared)
 
     async def _probe_soft_404(self, fetcher: Fetcher) -> tuple[int, ...]:
         """Ask for two URLs that cannot exist, and fingerprint what comes back.
@@ -304,7 +306,8 @@ class Crawler:
             else:
                 self.result.stats["render"] = "skipped: playwright not installed"
 
-        async with Fetcher(config) as fetcher:
+        cache = ResponseCache(config.cache, ttl=config.cache_ttl) if config.cache else None
+        async with Fetcher(config, cache=cache) as fetcher:
             if config.obey_robots:
                 self.result.robots = await self._load_robots(fetcher)
                 self._apply_crawl_delay(fetcher)
@@ -363,8 +366,15 @@ class Crawler:
             if config.check_external and not self._out_of_time():
                 self.result.external_links = await self._check_external_links(fetcher)
 
+            self.result.blocked_hosts = dict(fetcher.tripped_hosts)
+            if self.result.blocked_hosts and not self.result.stopped_because:
+                self.result.stopped_because = (
+                    "stopped asking " + ", ".join(self.result.blocked_hosts)
+                )
+
             self.result.stats = {
                 "requests": fetcher.requests_made,
+                **({"cache": cache.stats()} if cache else {}),
                 "bytes_downloaded": fetcher.bytes_downloaded,
                 "duration_ms": round((time.perf_counter() - self._started) * 1000, 1),
                 **self.result.stats,
@@ -372,6 +382,9 @@ class Crawler:
 
         if self.frontier.full and not self.result.stopped_because:
             self.result.stopped_because = f"page limit ({config.max_pages}) reached"
+
+        if cache is not None:
+            cache.close()
 
         if self._renderer is not None:
             self.result.stats["rendered"] = self._renderer.rendered

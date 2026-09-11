@@ -19,6 +19,7 @@ import random
 import re
 import ssl
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from .cache import ResponseCache
 from .config import CrawlConfig, DEFAULT_ACCEPT
 from .models import ErrorKind, Page, RedirectHop, Timing
 
@@ -82,6 +84,81 @@ _BLOCK_SIGNATURES = (
 _CHALLENGE_STATUSES = frozenset({200, 202, 401, 403, 405, 429, 503})
 
 
+# How much to slow down, and how far. A host that is struggling gets exponentially
+# more room; recovery is deliberately slower than backoff.
+BACKOFF_FACTOR = 2.0
+ERROR_FACTOR = 1.5
+RECOVERY_FACTOR = 0.8
+RECOVERY_AFTER = 5          # consecutive successes before easing off
+MAX_HOST_DELAY = 30.0
+SLOW_HOST_MS = 3000.0       # median latency above which we back off unprompted
+
+
+@dataclass
+class HostHealth:
+    """Per-host pacing that reacts to how the host is actually behaving.
+
+    A fixed delay is either too slow for a healthy host or too fast for a
+    struggling one. This starts at the configured delay and adapts: hard backoff
+    on 429/503, gentler on errors and high latency, and a slow return toward the
+    base once the host is answering normally again.
+    """
+
+    base_delay: float
+    delay: float
+    consecutive_blocks: int = 0
+    consecutive_errors: int = 0
+    successes: int = 0
+    tripped: bool = False
+    trip_reason: str = ""
+    requests: int = 0
+    latencies: deque = field(default_factory=lambda: deque(maxlen=10))
+
+    @classmethod
+    def start(cls, base_delay: float) -> "HostHealth":
+        return cls(base_delay=base_delay, delay=base_delay)
+
+    def set_base(self, delay: float) -> None:
+        """robots.txt Crawl-delay can only ever slow us down."""
+        self.base_delay = max(self.base_delay, delay)
+        self.delay = max(self.delay, delay)
+
+    def _slow_to(self, factor: float) -> None:
+        self.delay = min(MAX_HOST_DELAY, max(self.delay, self.base_delay, 0.1) * factor)
+
+    def record_block(self, max_blocks: int, reason: str) -> None:
+        self.consecutive_blocks += 1
+        self.successes = 0
+        self._slow_to(BACKOFF_FACTOR)
+        if self.consecutive_blocks >= max_blocks:
+            self.tripped = True
+            self.trip_reason = (
+                f"{self.consecutive_blocks} consecutive blocks ({reason}); stopped "
+                "rather than keep asking"
+            )
+
+    def record_error(self) -> None:
+        self.consecutive_errors += 1
+        self.successes = 0
+        if self.consecutive_errors >= 2:
+            self._slow_to(ERROR_FACTOR)
+
+    def record_success(self, ttfb_ms: float | None) -> None:
+        self.consecutive_blocks = 0
+        self.consecutive_errors = 0
+        self.successes += 1
+        if ttfb_ms is not None:
+            self.latencies.append(ttfb_ms)
+        if len(self.latencies) >= 5:
+            ordered = sorted(self.latencies)
+            if ordered[len(ordered) // 2] > SLOW_HOST_MS:
+                self._slow_to(ERROR_FACTOR)
+                return
+        if self.successes >= RECOVERY_AFTER and self.delay > self.base_delay:
+            self.delay = max(self.base_delay, self.delay * RECOVERY_FACTOR)
+            self.successes = 0
+
+
 class FetchFailure(Exception):
     def __init__(self, kind: ErrorKind, detail: str = "") -> None:
         super().__init__(detail or kind.value)
@@ -116,6 +193,7 @@ class _Raw:
     ttfb_ms: float
     download_ms: float
     attempts: int
+    from_cache: bool = False
 
 
 def split_content_type(value: str) -> tuple[str, str]:
@@ -222,10 +300,20 @@ def looks_blocked(status: int, headers: dict[str, str], body: bytes) -> str:
     return ""
 
 
+# Subclasses of ssl.SSLError that are not certificate problems at all. They are
+# transient conditions on a non-blocking socket, and classifying them as TLS
+# failures both skips the retry that would fix them and tells the user their
+# certificate is broken when it is fine.
+TRANSIENT_SSL = (ssl.SSLWantReadError, ssl.SSLWantWriteError,
+                 ssl.SSLSyscallError, ssl.SSLEOFError)
+
+
 def classify_exception(exc: Exception) -> tuple[ErrorKind, str]:
     """Map an httpx exception onto our error taxonomy, and say if it's worth a retry."""
     cause: BaseException | None = exc
     while cause is not None:
+        if isinstance(cause, TRANSIENT_SSL):
+            return ErrorKind.CONNECTION, f"{type(cause).__name__}: {cause}"
         if isinstance(cause, ssl.SSLError):
             return ErrorKind.TLS, f"{type(cause).__name__}: {cause}"
         cause = cause.__context__ if cause.__context__ is not cause else None
@@ -245,15 +333,26 @@ RETRYABLE_KINDS = frozenset({ErrorKind.TIMEOUT, ErrorKind.CONNECTION, ErrorKind.
 class Fetcher:
     """Owns the httpx client and the per-host pacing state for one run."""
 
-    def __init__(self, config: CrawlConfig) -> None:
+    def __init__(self, config: CrawlConfig, *, cache: ResponseCache | None = None) -> None:
         self.config = config
+        self.cache = cache
         self._client: httpx.AsyncClient | None = None
         self._semaphore = asyncio.Semaphore(max(1, config.concurrency))
         self._host_locks: dict[str, asyncio.Lock] = {}
         self._host_next: dict[str, float] = {}
-        self.host_delay: dict[str, float] = {}   # robots.txt Crawl-delay lands here
+        self._health: dict[str, HostHealth] = {}
         self.requests_made = 0
         self.bytes_downloaded = 0
+
+    def health(self, host: str) -> HostHealth:
+        health = self._health.get(host)
+        if health is None:
+            health = self._health[host] = HostHealth.start(self.config.delay)
+        return health
+
+    @property
+    def tripped_hosts(self) -> dict[str, str]:
+        return {host: h.trip_reason for host, h in self._health.items() if h.tripped}
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -293,7 +392,7 @@ class Fetcher:
     async def _pace(self, host: str) -> None:
         """Space request *launches* to one host. Held briefly, so requests still overlap."""
         cfg = self.config
-        gap = self.host_delay.get(host, cfg.delay)
+        gap = self.health(host).delay
         lock = self._host_locks.setdefault(host, asyncio.Lock())
         async with lock:
             now = time.monotonic()
@@ -304,11 +403,12 @@ class Fetcher:
 
     # --- one exchange ------------------------------------------------------
 
-    async def _send_once(self, url: str, method: str, force_read: bool = False) -> _Raw:
+    async def _send_once(self, url: str, method: str, force_read: bool = False,
+                         extra_headers: dict[str, str] | None = None) -> _Raw:
         assert self._client is not None, "use Fetcher as an async context manager"
         cfg = self.config
         started = time.perf_counter()
-        request = self._client.build_request(method, url)
+        request = self._client.build_request(method, url, headers=extra_headers or None)
         response = await self._client.send(request, stream=True)
         ttfb_ms = (time.perf_counter() - started) * 1000
         try:
@@ -351,19 +451,50 @@ class Fetcher:
             attempts=1,
         )
 
+    def _from_cache(self, entry, url: str) -> _Raw:
+        return _Raw(
+            url=entry.final_url or url,
+            status=entry.status,
+            reason="Cached",
+            headers=entry.headers,
+            cookies={},
+            http_version=entry.http_version,
+            body=entry.body,
+            wire_bytes=0,
+            truncated=False,
+            ttfb_ms=0.0,
+            download_ms=0.0,
+            attempts=0,
+            from_cache=True,
+        )
+
     async def _send_with_retries(self, url: str, method: str,
                                  force_read: bool = False) -> _Raw:
         cfg = self.config
         host = urlsplit(url).netloc
+        health = self.health(host)
         last_failure: FetchFailure | None = None
+
+        if health.tripped:
+            raise FetchFailure(ErrorKind.BLOCKED, health.trip_reason)
+
+        entry = self.cache.get(url) if self.cache and method == "GET" else None
+        conditional: dict[str, str] = {}
+        if entry is not None:
+            if entry.is_fresh(self.cache.ttl):
+                self.cache.hits += 1
+                return self._from_cache(entry, url)
+            if entry.has_validator:
+                conditional = entry.conditional_headers()
 
         for attempt in range(1, cfg.max_retries + 2):
             await self._pace(host)
             async with self._semaphore:
                 try:
-                    raw = await self._send_once(url, method, force_read)
+                    raw = await self._send_once(url, method, force_read, conditional)
                 except Exception as exc:  # noqa: BLE001 — mapped, never swallowed
                     kind, detail = classify_exception(exc)
+                    health.record_error()
                     last_failure = FetchFailure(kind, detail)
                     if kind not in RETRYABLE_KINDS or attempt > cfg.max_retries:
                         raise last_failure from exc
@@ -371,12 +502,32 @@ class Fetcher:
                     continue
 
             raw.attempts = attempt
-            if raw.status in RETRY_STATUSES and attempt <= cfg.max_retries:
-                await asyncio.sleep(
-                    parse_retry_after(raw.headers.get("retry-after", ""))
-                    or self._backoff(attempt)
-                )
-                continue
+
+            if raw.status == 304 and entry is not None:
+                # Still current: the server sent headers and no body.
+                self.cache.revalidated += 1
+                self.cache.touch(url)
+                health.record_success(raw.ttfb_ms)
+                return self._from_cache(entry, url)
+
+            if raw.status in RETRY_STATUSES:
+                health.record_block(cfg.max_blocks, f"HTTP {raw.status}")
+                if attempt <= cfg.max_retries and not health.tripped:
+                    await asyncio.sleep(
+                        parse_retry_after(raw.headers.get("retry-after", ""))
+                        or self._backoff(attempt)
+                    )
+                    continue
+                return raw
+
+            if blocked := looks_blocked(raw.status, raw.headers, raw.body):
+                health.record_block(cfg.max_blocks, blocked)
+            else:
+                health.record_success(raw.ttfb_ms)
+                if self.cache and method == "GET":
+                    self.cache.store(url, final_url=raw.url, status=raw.status,
+                                     headers=raw.headers, body=raw.body,
+                                     http_version=raw.http_version)
             return raw
 
         raise last_failure or FetchFailure(ErrorKind.UNKNOWN, "retries exhausted")
@@ -407,7 +558,8 @@ class Fetcher:
             for _ in range(cfg.max_redirects + 1):
                 raw = await self._send_with_retries(current, method, force_read)
                 page.requests += raw.attempts
-                page.retries += raw.attempts - 1
+                page.retries += max(0, raw.attempts - 1)
+                page.from_cache = page.from_cache or raw.from_cache
 
                 location = raw.headers.get("location", "")
                 if 300 <= raw.status < 400 and location:
