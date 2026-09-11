@@ -246,6 +246,61 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
 </table></div></div>
 {% endif %}
 
+{% if vitals %}
+<h2>Core Web Vitals</h2>
+<div class="panel"><div class="inner"><table>
+  <thead><tr><th>Page</th>
+    <th style="text-align:right">LCP</th><th style="text-align:right">CLS</th>
+    <th style="text-align:right">Blocking</th><th style="text-align:right">TTFB</th>
+    <th style="text-align:right">Requests</th></tr></thead>
+  <tbody>
+  {% for v in vitals %}
+    <tr>
+      <td class="mono"><a href="{{ v.url }}">{{ v.url|short }}</a></td>
+      {% for key, unit in [("lcp_ms", "ms"), ("cls", ""), ("total_blocking_ms", "ms"),
+                           ("ttfb_ms", "ms")] %}
+        {% set rating = v.ratings.get(key, "unknown") %}
+        <td style="text-align:right" class="mono
+            {{- ' c-critical' if rating == 'poor' else (' c-warning' if rating == 'needs-improvement' else (' c-ok' if rating == 'good' else '')) }}">
+          {{ v[key] if v[key] is not none else '—' }}{{ unit if v[key] is not none }}</td>
+      {% endfor %}
+      <td style="text-align:right" class="mono">{{ v.requests }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<div style="padding:12px 16px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px">
+  Measured here in a throttled mobile browser — a mid-tier phone on slow 4G. Google
+  ranks on <b>field</b> data from real Chrome users at the 75th percentile, and says lab
+  measurement is not a substitute for it. Interaction to Next Paint is missing because it
+  cannot be measured without real interactions; Total Blocking Time is the stand-in.
+</div></div>
+{% endif %}
+
+{% if external_data %}
+<h2>External data</h2>
+<div class="panel"><div class="inner"><table>
+  <tbody>
+  {% for source in external_data %}
+    <tr><td style="width:190px"><b>{{ source.provider }}</b></td>
+      <td>
+        {%- if not source.available -%}
+          <span style="color:var(--muted)">not configured — needs {{ source.requires }}</span>
+        {%- elif source.error -%}
+          <span class="c-warning">{{ source.error }}</span>
+        {%- else -%}
+          {% for m in source.metrics %}
+            <div><span class="mono">{{ m.name }}</span>
+              <b>{{ m.value }}{{ m.unit }}</b>
+              <span style="color:var(--muted)">{{ m.note or m.source }}</span></div>
+          {% endfor %}
+        {%- endif -%}
+      </td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endif %}
+
 {% if technologies %}
 <h2>Technology</h2>
 <div class="panel"><div class="inner" style="padding:14px">

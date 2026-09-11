@@ -27,6 +27,7 @@ from .graph import LinkGraph
 from .html import Document
 from . import language
 from .models import Finding, Page, Severity
+from .providers import configured as configured_providers
 from .report import RunStore, diff_runs, write_csv, write_html
 from .report.html_out import build_context
 from .robots import product_token
@@ -74,9 +75,32 @@ async def audit_single(
     return page, (doc.summary() if doc else None), technologies, stats
 
 
+async def query_providers(config: CrawlConfig, result: CrawlResult) -> None:
+    """Ask the configured external providers about this site.
+
+    Only providers with credentials are called. The rest are recorded as
+    unavailable with what they need, so an empty section explains itself.
+    """
+    host = urlsplit(config.url).netloc
+    for provider in configured_providers(psi_key=config.psi_key, opr_key=config.opr_key):
+        if not provider.available:
+            result.external_data.append(
+                {"provider": provider.name, "available": False, "free": provider.free,
+                 "requires": provider.requires})
+            continue
+        # PageSpeed Insights answers per URL; Open PageRank per domain.
+        answer = (await provider.page_metrics(config.url)
+                  if provider.name == "PageSpeed Insights"
+                  else await provider.domain_metrics(host))
+        result.external_data.append({**answer.to_dict(), "available": True,
+                                     "free": provider.free})
+
+
 async def run_crawl(config: CrawlConfig, on_page=None, should_stop=None) -> CrawlResult:
     crawler = Crawler(config, on_page=on_page, should_stop=should_stop)
     result = await crawler.run()
+    if config.psi_key or config.opr_key:
+        await query_providers(config, result)
     result.site_findings = run_site_analyzers(
         SiteContext(
             config=config,
@@ -185,6 +209,10 @@ def build_crawl_report(config: CrawlConfig, result: CrawlResult,
         "score": card.to_dict() if card else None,
         "comparison": comparison.to_dict() if comparison else None,
         "summary": summarise(all_findings(result)),
+        "external_data": result.external_data or None,
+        "vitals": [
+            {"url": p.final_url, **p.vitals} for p in result.pages if p.vitals
+        ] or None,
         "graph": result.graph.summary(),
         "technologies": [tech.to_dict() for tech in result.technologies],
         "site_findings": [_finding_dict(f) for f in result.site_findings],
@@ -672,6 +700,7 @@ def write_side_reports(config: CrawlConfig, result: CrawlResult, card: Scorecard
             stats=result.stats,
             stopped_because=result.stopped_because,
             comparison=comparison,
+            external_data=result.external_data,
         )
         notes.append(f"wrote {write_html(config.html, context)}")
 

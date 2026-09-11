@@ -67,6 +67,9 @@ def config_from_form(form) -> CrawlConfig:
         check_external=bool(form.get("check_external")),
         render=render if render in RENDER_CHOICES else "auto",
         against=parse_rivals(form.get("against", "")),
+        vitals=bool(form.get("vitals")),
+        # API keys are deliberately not taken from the web form: a browser form is
+        # the wrong place to hand out credentials. Pass them on the command line.
         quiet=True,
     )
 

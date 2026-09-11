@@ -42,9 +42,11 @@
       <label><input type="checkbox" name="no_sitemap"> Ignore sitemaps</label>
       <label><input type="checkbox" name="check_external"> Check external links</label>
       <label><input type="checkbox" name="ignore_robots"> Ignore robots.txt</label>
+      <label><input type="checkbox" name="vitals"> Measure Core Web Vitals</label>
     </div>
     <div class="note">Ignoring robots.txt is for sites you own. Checking external links sends
-      requests to third-party servers.</div>
+      requests to third-party servers. Measuring Core Web Vitals loads a handful of pages in a
+      throttled mobile browser and adds roughly ten seconds each.</div>
 
     <div style="margin-top:20px">
       <button type="submit" {{ 'disabled' if active >= 2 }}>Start crawl</button>

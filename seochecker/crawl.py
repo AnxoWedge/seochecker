@@ -26,7 +26,9 @@ from .html import Document
 from .models import Finding, Page
 from .render import Renderer, playwright_available, should_render
 from .robots import RobotsTxt, parse as parse_robots, product_token
+from .analyzers import vitals as vitals_findings
 from .similarity import content_hash, near_duplicate, sketch
+from . import vitals as vitals_measure
 from .sitemap import SitemapSet, load_sitemaps
 from .thresholds import Thresholds
 from .urls import Scope, normalize
@@ -58,6 +60,8 @@ class CrawlResult:
     blocked_hosts: dict[str, str] = field(default_factory=dict)
     graph: LinkGraph = field(default_factory=LinkGraph)
     soft_404_fingerprint: tuple = ()
+    vitals_measured: int = 0
+    external_data: list = field(default_factory=list)
     external_links: dict = field(default_factory=dict)
     frontier: dict[str, Any] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
@@ -275,6 +279,35 @@ class Crawler:
 
     # --- run ---------------------------------------------------------------
 
+    async def _measure_vitals(self) -> None:
+        """Measure the pages that matter most, chosen by internal PageRank.
+
+        Each measurement costs about ten seconds under throttling, so this runs
+        after the crawl on a handful of pages rather than on all of them.
+        """
+        if not playwright_available():
+            self.result.stats["vitals"] = "skipped: playwright not installed"
+            return
+
+        candidates = [p for p in self.result.pages
+                      if p.error is None and p.ok and p.is_html and not p.duplicate_of]
+        candidates.sort(key=lambda p: -p.pagerank)
+        chosen = candidates[: max(1, self.config.vitals_pages)]
+        if not chosen:
+            return
+
+        renderer = self._renderer or Renderer(timeout=self.config.timeout,
+                                              user_agent=self.config.user_agent)
+        self._renderer = renderer
+        browser = await renderer._ensure_browser()
+        for page in chosen:
+            measured = await vitals_measure.measure(
+                browser, page.final_url, timeout=self.config.timeout * 3,
+                user_agent=self.config.user_agent)
+            page.vitals = measured.to_dict()
+            self.result.vitals_measured += 1
+        vitals_findings.attach(chosen)
+
     def _seed_sitemap(self, queue: asyncio.Queue, urls: list[str],
                       start: int, limit: int) -> int:
         """Enqueue sitemap URLs from `start` until `limit` of them are accepted.
@@ -416,7 +449,7 @@ class Crawler:
         if cache is not None:
             cache.close()
 
-        if self._renderer is not None:
+        if self._renderer is not None and not config.vitals:
             self.result.stats["rendered"] = self._renderer.rendered
             self.result.stats["render_failures"] = self._renderer.failures
             await self._renderer.close()
@@ -424,9 +457,15 @@ class Crawler:
         self.result.graph = LinkGraph.build(self.result.pages, config.url)
         self.result.graph.apply_to(self.result.pages)
 
+        if config.vitals:
+            await self._measure_vitals()
+
         self.result.technologies = sorted(
             self._merged.values(), key=lambda d: (-d.confidence, d.category, d.name)
         )
+        if self._renderer is not None:
+            await self._renderer.close()
+
         self.result.frontier = self.frontier.summary()
         self.result.frontier["sitemap_urls"] = sorted(self._sitemap_urls)
         return self.result

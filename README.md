@@ -74,6 +74,10 @@ pipe the report while still watching the run:
 | `--no-soft-404-probe` | Skip the single request that tests how the site handles a missing URL |
 | `--render never\|auto\|always` | Headless rendering policy (default `auto`) |
 | `--max-render 50` | Cap on pages rendered (default 25) |
+| `--vitals` | Measure Core Web Vitals in a throttled mobile browser |
+| `--vitals-pages 10` | How many pages to measure, chosen by internal PageRank |
+| `--psi-key KEY` | PageSpeed Insights: real Core Web Vitals from Chrome users |
+| `--opr-key KEY` | Open PageRank: a free domain authority estimate |
 | `--delay 1.0` | Minimum seconds between requests to one host |
 | `--timeout 30` | Per-request timeout |
 | `--retries 3` | Retries on timeouts, connection errors and 429/5xx |
@@ -133,6 +137,53 @@ directly, with weights fitted against a table of stated expectations:
 
 For reference, measured: wordpress.org scores 72, mozilla.org 70, and a
 well-built single page (MDN) 86.
+
+## Core Web Vitals
+
+`--vitals` loads a handful of pages in the Chromium already used for rendering,
+under Lighthouse's mobile profile — a mid-tier phone on slow 4G — and measures
+LCP, CLS, FCP, TTFB, Total Blocking Time and long tasks. Pages are chosen by
+internal PageRank, so it measures what matters rather than whatever came first.
+
+Throttling is not optional, and here is why. Measured on wordpress.org:
+
+| | Unthrottled | Throttled |
+| --- | ---: | ---: |
+| Largest Contentful Paint | 1000ms — *good* | 3208ms — *needs improvement* |
+
+Without it you would tell a client their site is fine when it is not.
+
+**These are lab measurements.** Google ranks on *field* data — real Chrome users
+at the 75th percentile — and states plainly that lab measurement is not a
+substitute for it. Every vitals finding says so. Interaction to Next Paint is
+absent because it cannot be measured without real interactions; Total Blocking
+Time is the accepted stand-in.
+
+For the real thing, supply a key:
+
+```bash
+./venv/bin/python seocheck.py mysite.com --psi-key YOUR_KEY
+```
+
+## External data
+
+Three things a crawl cannot see, each behind an API:
+
+| Provider | Gives | Needs |
+| --- | --- | --- |
+| PageSpeed Insights | Real Core Web Vitals from Chrome users, plus Lighthouse scores | A free Google API key |
+| Open PageRank | A 0–10 domain authority estimate | A free key |
+| Moz Links API | Domain Authority, Page Authority, Spam Score | A paid subscription |
+
+The tool is complete without any of them. Each reports what it needs when not
+configured, so an empty section explains itself rather than looking broken.
+
+Moz is deliberately left unimplemented: the API is paid, so there is nothing to
+test an implementation against. The adapter shape is two methods; add them when
+there is a key to check them with.
+
+Keys are CLI-only and never read from the dashboard form — a browser form is the
+wrong place to hand out credentials.
 
 ## JavaScript rendering
 
@@ -438,6 +489,8 @@ seochecker/
   score.py               the scoring model, and the calibration behind it
   compare.py             rival comparison: metrics and gap analysis
   language.py            hreflang clusters, so translations are not duplicates
+  vitals.py              Core Web Vitals measured in the browser we already run
+  providers/             external data: PageSpeed Insights, Open PageRank, Moz
   report/
     html_out.py          self-contained HTML report
     template.html.j2     its markup, styles and interactions
@@ -461,4 +514,5 @@ tests/test_politeness.py  pacing, the circuit breaker, and the cache
 tests/test_web.py         the dashboard, end to end
 tests/test_compare.py     comparison metrics, gaps, and the equal-budget contract
 tests/test_language.py    language-aware duplicate detection
+tests/test_vitals.py      vitals thresholds, findings, and the provider interface
 ```

@@ -13,7 +13,7 @@ can see it.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from statistics import median
 from typing import Any
 from urllib.parse import urlsplit
@@ -162,7 +162,9 @@ class SiteMetrics:
         self.median_html_kb = _median([p.decoded_bytes / 1024 for p in html if p.decoded_bytes])
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items()}
+        # asdict rather than __dict__, so adding slots here can never silently
+        # empty the report.
+        return asdict(self)
 
 
 @dataclass

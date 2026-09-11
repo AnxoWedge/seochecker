@@ -66,6 +66,7 @@ def build_context(
     stats: dict[str, Any] | None = None,
     stopped_because: str = "",
     comparison: Any = None,
+    external_data: list | None = None,
 ) -> dict[str, Any]:
     every = list(site_findings) + [f for page in pages for f in page.findings]
     counts = Counter(f.severity.value for f in every)
@@ -111,6 +112,8 @@ def build_context(
         "crawl": crawl or {},
         "stats": stats or {},
         "stopped_because": stopped_because,
+        "vitals": [{"url": p.final_url, **p.vitals} for p in pages if p.vitals],
+        "external_data": external_data or [],
         "comparison": comparison.to_dict() if comparison is not None else None,
         "comparison_metrics": comparison.metric_table() if comparison is not None else [],
         "comparison_hosts": ([comparison.target.host] + [r.host for r in comparison.rivals]

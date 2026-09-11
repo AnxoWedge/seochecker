@@ -104,6 +104,7 @@ class Page:
     from_cache: bool = False
     from_sitemap: bool = False   # discovered via sitemap, not by a link
     duplicate_of: str = ""       # redirected onto a URL already crawled
+    vitals: dict[str, Any] = field(default_factory=dict)   # lab Core Web Vitals
 
     # Captured during the crawl so whole-site analysis has something to work
     # with once the parsed document is gone.

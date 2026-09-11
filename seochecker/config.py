@@ -55,6 +55,10 @@ class CrawlConfig:
     # --- rendering ----------------------------------------------------------
     render: str = "auto"        # never | auto | always
     max_render: int = 25        # rendering costs 1-10s a page, so it is capped
+    vitals: bool = False        # measure Core Web Vitals in the browser
+    vitals_pages: int = 5       # each measurement takes ~10s under throttling
+    psi_key: str = ""           # PageSpeed Insights: real field vitals
+    opr_key: str = ""           # Open PageRank: domain authority
     max_time: float = 0.0   # seconds; 0 = no limit
 
     # --- politeness ---------------------------------------------------------
@@ -214,6 +218,18 @@ def build_parser() -> argparse.ArgumentParser:
                          "served HTML looks incomplete")
     js.add_argument("--max-render", type=int, default=25, metavar="N",
                     help="cap on pages rendered, since each costs 1-10 seconds")
+    js.add_argument("--vitals", action="store_true",
+                    help="measure Core Web Vitals in a throttled mobile browser "
+                         "(lab data, roughly 10 seconds per page)")
+    js.add_argument("--vitals-pages", type=int, default=5, metavar="N",
+                    help="how many pages to measure, chosen by internal PageRank")
+
+    keys = p.add_argument_group("external data (optional, each needs a key)")
+    keys.add_argument("--psi-key", default="", metavar="KEY",
+                      help="Google PageSpeed Insights key: real Core Web Vitals from "
+                           "Chrome users, which is what Google actually ranks on")
+    keys.add_argument("--opr-key", default="", metavar="KEY",
+                      help="Open PageRank key: a free domain authority estimate")
 
     fp = p.add_argument_group("fingerprinting")
     fp.add_argument("--rules", default=None, metavar="PATH",
@@ -265,6 +281,10 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         check_external=args.check_external,
         render=args.render,
         max_render=args.max_render,
+        vitals=args.vitals,
+        vitals_pages=args.vitals_pages,
+        psi_key=args.psi_key,
+        opr_key=args.opr_key,
         max_time=args.max_time,
         concurrency=args.concurrency,
         delay=args.delay,
