@@ -14,15 +14,21 @@ from urllib.parse import urlsplit
 from ..config import CrawlConfig
 from ..html import Document
 from ..models import Finding, Page, Severity
+from ..robots import RobotsTxt
+from ..sitemap import SitemapSet
 from ..thresholds import Thresholds
 
 Analyzer = Callable[["PageContext"], Iterable[Finding]]
+SiteAnalyzer = Callable[["SiteContext"], Iterable[Finding]]
 
 REGISTRY: list[Analyzer] = []
 
 # Analyzers safe to run when the fetch failed or was challenged. Everything else
 # would be describing a bot-mitigation page as if it were the site.
 ERROR_SAFE: set[str] = set()
+
+# Checks that need the whole crawl, not one page.
+SITE_REGISTRY: list["SiteAnalyzer"] = []
 
 # Most severe first, for sorting output.
 SEVERITY_ORDER = {
@@ -47,6 +53,32 @@ def analyzer(fn: Analyzer | None = None, *, when_errored: bool = False):
         return func
 
     return register(fn) if fn is not None else register
+
+
+@dataclass(slots=True)
+class SiteContext:
+    """Everything a whole-crawl check needs."""
+
+    config: CrawlConfig
+    pages: list[Page] = field(default_factory=list)
+    robots: RobotsTxt = field(default_factory=RobotsTxt)
+    sitemap: SitemapSet = field(default_factory=SitemapSet)
+    sitemap_urls: set[str] = field(default_factory=set)
+    frontier: dict = field(default_factory=dict)
+    technologies: list = field(default_factory=list)
+    thresholds: Thresholds = field(default_factory=Thresholds)
+
+    @property
+    def html_pages(self) -> list[Page]:
+        return [p for p in self.pages if p.error is None and p.is_html]
+
+    def page_for(self, url: str) -> Page | None:
+        from ..urls import normalize
+        target = normalize(url)
+        for page in self.pages:
+            if normalize(page.requested_url) == target:
+                return page
+        return None
 
 
 @dataclass(slots=True)
@@ -103,6 +135,27 @@ def notice(id: str, message: str, *, evidence: str = "", fix: str = "") -> Findi
 
 def info(id: str, message: str, *, evidence: str = "", fix: str = "") -> Finding:
     return _make(Severity.INFO, id, message, evidence, fix)
+
+
+def site_analyzer(fn: "SiteAnalyzer") -> "SiteAnalyzer":
+    """Register a whole-crawl check."""
+    SITE_REGISTRY.append(fn)
+    return fn
+
+
+def run_site_analyzers(ctx: SiteContext) -> list[Finding]:
+    findings: list[Finding] = []
+    for fn in SITE_REGISTRY:
+        try:
+            findings.extend(fn(ctx))
+        except Exception as exc:  # noqa: BLE001
+            findings.append(
+                Finding(id="analyzer.error", severity=Severity.INFO, category="analyzer",
+                        message=f"site analyzer {fn.__name__!r} failed",
+                        evidence=f"{type(exc).__name__}: {exc}")
+            )
+    findings.sort(key=lambda f: (SEVERITY_ORDER[f.severity], f.category, f.id))
+    return findings
 
 
 def sample(items: Iterable[str], limit: int = 5) -> str:

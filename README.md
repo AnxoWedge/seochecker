@@ -12,28 +12,38 @@ python3 -m venv venv
 
 ## Usage
 
+Crawl a site:
+
 ```bash
-./venv/bin/python seocheck.py example.com --single
+./venv/bin/python seocheck.py example.com -o out/report.json
+```
+
+Or audit a single page:
+
+```bash
+./venv/bin/python seocheck.py example.com/pricing --single
 ```
 
 The human-readable summary goes to stderr, the JSON report to stdout — so you can
 pipe the report while still watching the run:
 
 ```bash
-./venv/bin/python seocheck.py example.com --single | jq '.pages[0].seo'
-```
-
-Or write it to a file:
-
-```bash
-./venv/bin/python seocheck.py example.com --single -o out/report.json
+./venv/bin/python seocheck.py example.com | jq '.summary.by_id'
 ```
 
 ### Useful flags
 
 | Flag | What it does |
 | --- | --- |
-| `--single` | Audit one URL, don't crawl (multi-page crawling is not built yet) |
+| `--single` | Audit one URL instead of crawling |
+| `--max-pages 200` | Page budget for the crawl (default 500) |
+| `--max-depth 3` | How many links deep to follow (default 5) |
+| `--max-time 600` | Stop after this many seconds |
+| `-c 8` | Concurrent requests (default 5) |
+| `--subdomains` | Follow links into subdomains too |
+| `--include` / `--exclude` | Regex filters on URLs (repeatable) |
+| `--no-sitemap` | Don't seed the crawl from sitemaps |
+| `--ignore-robots` | Ignore robots.txt — only for sites you own |
 | `--delay 1.0` | Minimum seconds between requests to one host |
 | `--timeout 30` | Per-request timeout |
 | `--retries 3` | Retries on timeouts, connection errors and 429/5xx |
@@ -47,7 +57,35 @@ Or write it to a file:
 | `--rules path.yaml` | Use a custom technology rules file |
 | `--min-confidence 0.8` | Hide technology detections below this confidence |
 
-Exit code is `0` when the page fetched with a 2xx, `1` otherwise — so it can gate CI.
+Exit code is `0` on success, `1` when the fetch failed or `--fail-on` is triggered —
+so it can gate CI.
+
+## How it crawls
+
+- **robots.txt** is parsed per RFC 9309: per-agent groups, longest-match
+  precedence, `Allow` winning ties, `*` and `$` wildcards, plus `Crawl-delay` and
+  `Sitemap:` discovery. A declared crawl delay can only ever slow the crawl down,
+  never speed it up.
+- **Sitemaps** are found from robots.txt (falling back to `/sitemap.xml`),
+  including `<sitemapindex>` recursion, gzipped `.xml.gz` files and the plain-text
+  form. Entries are then cross-checked against the crawl: sitemap URLs that 404,
+  redirect, are `noindex`, or canonicalise elsewhere all get reported.
+- **URL normalization** decides what counts as the same page: lowercased host,
+  no fragment, no default port, tracking parameters dropped (`utm_*`, `fbclid`,
+  `gclid` and friends), remaining parameters sorted. Path case and trailing
+  slashes are *preserved*, because servers are allowed to treat them as
+  significant and plenty do.
+- **Scope** defaults to the target's own site, treating `www.` and the bare host
+  as one. `--subdomains` widens it with a dot-anchored suffix match, so
+  `evil-example.com` cannot pass as `example.com`.
+- **The budget is shared.** A quarter of `--max-pages` is seeded from the sitemap
+  up front and the rest is left for link discovery, with a top-up pass from the
+  sitemap once links run out. Seeding the whole sitemap first would mean the link
+  graph is never seen; seeding none of it would mean sitemap entries are never
+  validated.
+- **Every skipped URL is counted with a reason** — off-site, already seen, beyond
+  max depth, blocked by robots.txt — so a crawl that visits 12 pages when you
+  expected 500 explains itself.
 
 ## What it checks
 
@@ -68,6 +106,11 @@ a fix.
 | `i18n` | missing or malformed `lang`, invalid hreflang codes, no self-reference, no `x-default`, relative hreflang URLs |
 | `technical` | 4xx/5xx, not HTTPS, mixed content, no HSTS, redirect chains, temporary redirects, missing viewport, undeclared charset, slow TTFB, no compression, large HTML, HTTP/1.1, no cache validators, render-blocking scripts, no favicon |
 | `content` | empty (JS-rendered), very thin, thin, low text-to-HTML ratio, app-shell detection |
+| `url` | too long, too deep, uppercase, underscores, session IDs, too many parameters |
+
+Plus whole-crawl checks: `robots.*` (missing, unreachable, blocking everything,
+no sitemap declared), `sitemap.*` (missing, unreadable, broken/redirecting/
+noindexed/non-canonical entries) and `crawl.*`.
 
 Severities are `critical`, `warning`, `notice`, `info`. A page that is blocked or
 fails to fetch reports **only that** — a bot-mitigation challenge page is never
@@ -150,6 +193,11 @@ seochecker/
   html.py                analyzer-friendly DOM wrapper
   models.py              Page, Finding, Timing, error taxonomy
   thresholds.py          every tunable number, in one place
+  crawl.py               orchestrator: robots -> sitemap -> frontier -> fetch
+  frontier.py            the queue, dedup, and why URLs were skipped
+  urls.py                normalization and scope rules
+  robots.py              robots.txt parser (RFC 9309)
+  sitemap.py             sitemap, sitemapindex, gzip and plain-text forms
   fingerprint/
     rules.yaml           68 technologies, 136 signals — data, not code
     detect.py            rules engine, confidence scoring, implications
@@ -161,4 +209,5 @@ seochecker/
 tests/test_fetch.py       fetch layer: redirects, retries, failures
 tests/test_analyzers.py   on-page checks, including false-positive guards
 tests/test_fingerprint.py rules engine, confidence, implications
+tests/test_crawl.py       scope, dedup, robots, sitemap, limits
 ```

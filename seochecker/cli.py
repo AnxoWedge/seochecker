@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .analyzers import PageContext, run_page_analyzers
+from .analyzers import PageContext, SiteContext, run_page_analyzers, run_site_analyzers
+from .crawl import CrawlResult, Crawler
 from .config import CrawlConfig, config_from_args
 from .fetch import Fetcher
 from .fingerprint import Detection, Fingerprinter, group_by_category
 from .html import Document
 from .models import Finding, Page, Severity
+from .robots import product_token
 from .thresholds import Thresholds
 
 MISSING = "[red]— missing —[/red]"
@@ -65,13 +67,82 @@ async def audit_single(
     return page, (doc.summary() if doc else None), technologies, stats
 
 
+async def run_crawl(config: CrawlConfig, on_page=None) -> CrawlResult:
+    crawler = Crawler(config, on_page=on_page)
+    result = await crawler.run()
+    result.site_findings = run_site_analyzers(
+        SiteContext(
+            config=config,
+            pages=result.pages,
+            robots=result.robots,
+            sitemap=result.sitemap,
+            sitemap_urls=set(result.frontier.get("sitemap_urls", [])),
+            frontier=result.frontier,
+            technologies=result.technologies,
+            thresholds=Thresholds(),
+        )
+    )
+    return result
+
+
+def build_crawl_report(config: CrawlConfig, result: CrawlResult) -> dict[str, Any]:
+    all_findings = list(result.site_findings)
+    for page in result.pages:
+        all_findings.extend(page.findings)
+    return {
+        "seochecker": __version__,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "target": config.url,
+        "mode": "crawl",
+        "config": {
+            "user_agent": config.user_agent,
+            "max_pages": config.max_pages,
+            "max_depth": config.max_depth,
+            "concurrency": config.concurrency,
+            "delay": config.delay,
+            "obey_robots": config.obey_robots,
+            "use_sitemap": config.use_sitemap,
+            "include_subdomains": config.include_subdomains,
+        },
+        "stats": result.stats,
+        "crawl": {
+            "pages_crawled": len(result.pages),
+            "stopped_because": result.stopped_because or "frontier exhausted",
+            "frontier": {k: v for k, v in result.frontier.items() if k != "sitemap_urls"},
+            "robots": {
+                "url": result.robots.source_url,
+                "fetched": result.robots.fetched,
+                "status": result.robots.status,
+                "error": result.robots.error or None,
+                "sitemaps": result.robots.sitemaps,
+                "crawl_delay": result.robots.crawl_delay(product_token(config.user_agent)),
+            },
+            "sitemap": {
+                "files": result.sitemap.fetched,
+                "failed": [{"url": u, "reason": r} for u, r in result.sitemap.failed],
+                "urls": len(result.sitemap.entries),
+                "truncated": result.sitemap.truncated,
+            },
+        },
+        "summary": summarise(all_findings),
+        "technologies": [tech.to_dict() for tech in result.technologies],
+        "site_findings": [_finding_dict(f) for f in result.site_findings],
+        "pages": [p.to_dict(include_html=config.include_html) for p in result.pages],
+    }
+
+
+def _finding_dict(finding: Finding) -> dict[str, Any]:
+    from dataclasses import asdict
+    return {**asdict(finding), "severity": finding.severity.value}
+
+
 def summarise(findings: list[Finding]) -> dict[str, Any]:
     by_severity = Counter(f.severity.value for f in findings)
     return {
         "total": len(findings),
         "by_severity": {s.value: by_severity.get(s.value, 0) for s in Severity},
         "by_category": dict(Counter(f.category for f in findings).most_common()),
-        "ids": sorted({f.id for f in findings}),
+        "by_id": dict(Counter(f.id for f in findings).most_common()),
     }
 
 
@@ -99,7 +170,8 @@ def build_report(config: CrawlConfig, page: Page, seo: dict[str, Any] | None,
     }
 
 
-def render_findings(console, findings: list[Finding], minimum: Severity) -> None:
+def render_findings(console, findings: list[Finding], minimum: Severity,
+                    title: str = "Findings") -> None:
     from rich.padding import Padding
     from rich.text import Text
 
@@ -111,7 +183,7 @@ def render_findings(console, findings: list[Finding], minimum: Severity) -> None
         console.print("\n[green]No findings at or above this severity.[/green]")
         return
 
-    console.print(f"\n[bold]Findings[/bold] [dim]({len(shown)} shown)[/dim]")
+    console.print(f"\n[bold]{title}[/bold] [dim]({len(shown)} shown)[/dim]")
     for finding in shown:
         label, style = SEVERITY_STYLE[finding.severity]
         line = Text.assemble(
@@ -215,6 +287,117 @@ def render_human(page: Page, seo: dict[str, Any] | None, technologies: list[Dete
                   f"{stats['bytes_downloaded'] / 1024:.1f} KB, {stats['duration_ms']:.0f}ms[/dim]\n")
 
 
+def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) -> None:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    console = Console(stderr=True)
+    ok_pages = [p for p in result.pages if p.error is None and p.ok]
+    duration = result.stats.get("duration_ms", 0) / 1000
+
+    console.print(
+        f"\n[bold]{config.url}[/bold]  "
+        f"[dim]{len(result.pages)} pages in {duration:.1f}s · "
+        f"{result.stats.get('requests', 0)} requests · "
+        f"{result.stats.get('bytes_downloaded', 0) / 1_048_576:.1f} MB[/dim]"
+    )
+    console.print(f"[dim]stopped: {result.stopped_because or 'frontier exhausted'}[/dim]")
+
+    overview = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    overview.add_column(style="dim", width=15)
+    overview.add_column(overflow="fold")
+    robots = result.robots
+    overview.add_row("robots.txt",
+                     f"{'found' if robots.fetched else robots.error or robots.status or 'none'}"
+                     + (f" · {len(robots.sitemaps)} sitemap(s) declared" if robots.sitemaps else ""))
+    overview.add_row("sitemap",
+                     f"{len(result.sitemap.entries)} URLs across "
+                     f"{len(result.sitemap.fetched)} file(s)"
+                     if result.sitemap.fetched else "[yellow]none found[/yellow]")
+    by_status = Counter(p.status for p in result.pages if p.status)
+    overview.add_row("statuses", " · ".join(f"{code}: {n}" for code, n in sorted(by_status.items())))
+    if skipped := result.frontier.get("skipped"):
+        overview.add_row("skipped", " · ".join(f"{n} {why}" for why, n in
+                                               list(skipped.items())[:5]))
+    console.print()
+    console.print(overview)
+
+    render_technologies(console, result.technologies)
+
+    if result.site_findings:
+        render_findings(console, result.site_findings, minimum, title="Site findings")
+
+    # One line per issue type, not per page — a 500-page crawl would otherwise
+    # print thousands of near-identical lines.
+    page_findings = [f for page in result.pages for f in page.findings]
+    if page_findings:
+        grouped: dict[str, list[Finding]] = {}
+        for finding in page_findings:
+            grouped.setdefault(finding.id, []).append(finding)
+
+        rows = sorted(
+            grouped.items(),
+            key=lambda item: (SEVERITY_RANK[item[1][0].severity], -len(item[1])),
+        )
+        console.print(f"\n[bold]Page findings[/bold] [dim]({len(page_findings)} across "
+                      f"{len(result.pages)} pages)[/dim]")
+        table = Table(box=None, padding=(0, 2, 0, 0), header_style="dim")
+        table.add_column("severity", width=9)
+        table.add_column("finding", width=32)
+        table.add_column("pages", justify="right", width=6)
+        table.add_column("example", overflow="fold")
+        for finding_id, items in rows:
+            severity = items[0].severity
+            if SEVERITY_RANK[severity] > SEVERITY_RANK[minimum]:
+                continue
+            label, style = SEVERITY_STYLE[severity]
+            table.add_row(
+                Text(label.strip(), style=style.replace("on ", "").replace("bold white", "bold")),
+                finding_id,
+                str(len(items)),
+                _short(items[0].url or "", config.url),
+            )
+        console.print(table)
+
+    problems = [p for p in result.pages if p.error is not None or not p.ok]
+    if problems:
+        console.print(f"\n[bold]Pages that did not return 200[/bold] [dim]({len(problems)})[/dim]")
+        for page in problems[:15]:
+            state = page.error.value if page.error else str(page.status)
+            console.print(f"  [red]{state:<12}[/red] {_short(page.requested_url, config.url)}")
+        if len(problems) > 15:
+            console.print(f"  [dim]... and {len(problems) - 15} more[/dim]")
+
+    counts = Counter(f.severity for f in page_findings + result.site_findings)
+    console.print(
+        f"\n[red]{counts[Severity.CRITICAL]} critical[/red] · "
+        f"[yellow]{counts[Severity.WARNING]} warning[/yellow] · "
+        f"[cyan]{counts[Severity.NOTICE]} notice[/cyan] · "
+        f"[blue]{counts[Severity.INFO]} info[/blue]"
+        f"   [dim]{len(ok_pages)}/{len(result.pages)} pages returned 200[/dim]\n"
+    )
+
+
+def _short(url: str, target: str) -> str:
+    """Trim the origin off a URL so the interesting part is visible in a table."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.netloc and parts.netloc == urlsplit(target).netloc:
+        return (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    return url
+
+
+def crawl_exit_code(result: CrawlResult, fail_on: str) -> int:
+    if not result.pages:
+        return 1
+    if fail_on == "never":
+        return 0
+    threshold = SEVERITY_RANK[Severity(fail_on)]
+    findings = list(result.site_findings) + [f for p in result.pages for f in p.findings]
+    return 1 if any(SEVERITY_RANK[f.severity] <= threshold for f in findings) else 0
+
+
 def exit_code(page: Page, fail_on: str) -> int:
     if page.error is not None or not page.ok:
         return 1
@@ -226,14 +409,64 @@ def exit_code(page: Page, fail_on: str) -> int:
     return 0 if page.ok else 1
 
 
+def _write(payload: str, config: CrawlConfig) -> None:
+    if config.out:
+        path = Path(config.out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload + "\n", encoding="utf-8")
+        if not config.quiet:
+            print(f"wrote {path}", file=sys.stderr)
+    else:
+        print(payload)
+
+
+def _crawl_with_progress(config: CrawlConfig) -> CrawlResult:
+    """Run the crawl, showing live progress on stderr unless --quiet."""
+    if config.quiet:
+        return asyncio.run(run_crawl(config))
+
+    from rich.console import Console
+    from rich.progress import (
+        BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn,
+    )
+
+    console = Console(stderr=True)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=28),
+        TextColumn("{task.completed}/{task.total} pages"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task_id = progress.add_task("crawling", total=1)
+
+        def on_page(page: Page, frontier) -> None:
+            progress.update(
+                task_id,
+                advance=1,
+                total=max(1, frontier.accepted),
+                description=f"crawling [dim]{_short(page.final_url, config.url)[:48]}[/dim]",
+            )
+
+        return asyncio.run(run_crawl(config, on_page=on_page))
+
+
 def main(argv: list[str] | None = None) -> int:
     config = config_from_args(argv)
 
     if not config.single:
-        print(
-            "note: multi-page crawling arrives in Phase 4 — auditing the single URL.",
-            file=sys.stderr,
-        )
+        try:
+            result = _crawl_with_progress(config)
+        except KeyboardInterrupt:
+            print("interrupted", file=sys.stderr)
+            return 130
+        _write(json.dumps(build_crawl_report(config, result), indent=2, ensure_ascii=False),
+               config)
+        if not config.quiet:
+            render_crawl(result, config, Severity(config.min_severity))
+        return crawl_exit_code(result, config.fail_on)
 
     try:
         page, seo, technologies, stats = asyncio.run(audit_single(config))
@@ -244,14 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(config, page, seo, technologies, stats)
     payload = json.dumps(report, indent=2, ensure_ascii=False)
 
-    if config.out:
-        path = Path(config.out)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(payload + "\n", encoding="utf-8")
-        if not config.quiet:
-            print(f"wrote {path}", file=sys.stderr)
-    else:
-        print(payload)
+    _write(payload, config)
 
     if not config.quiet:
         render_human(page, seo, technologies, stats, Severity(config.min_severity))

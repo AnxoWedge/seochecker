@@ -98,6 +98,7 @@ class Page:
     depth: int = 0
     referrer: str | None = None
     from_cache: bool = False
+    from_sitemap: bool = False   # discovered via sitemap, not by a link
     rendered: bool = False
     findings: list[Finding] = field(default_factory=list)
 

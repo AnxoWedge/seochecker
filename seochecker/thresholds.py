@@ -32,3 +32,7 @@ class Thresholds:
     max_links: int = 150
     render_blocking_warn: int = 3
     redirect_chain_warn: int = 2
+
+    url_max_length: int = 115
+    url_max_depth: int = 4
+    url_max_params: int = 2

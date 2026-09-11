@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import gzip
 import random
 import re
 import ssl
@@ -145,6 +146,20 @@ def sniff_meta_charset(prefix: bytes) -> str:
     return ""
 
 
+def maybe_gunzip(body: bytes) -> bytes:
+    """Decompress a gzip payload that was not declared via Content-Encoding.
+
+    Sitemaps are routinely served as `.xml.gz` with `Content-Type:
+    application/gzip`, which httpx correctly does not decompress for us.
+    """
+    if not body.startswith(b"\x1f\x8b"):
+        return body
+    try:
+        return gzip.decompress(body)
+    except (OSError, EOFError):
+        return body
+
+
 def decode_body(body: bytes, header_charset: str = "") -> tuple[str, str, str]:
     """Decode bytes to text. Returns (text, charset, where the charset came from).
 
@@ -152,6 +167,7 @@ def decode_body(body: bytes, header_charset: str = "") -> tuple[str, str, str]:
     header, then an in-document declaration, then UTF-8, then a cp1252 rescue so
     a mis-declared legacy page still yields readable text.
     """
+    body = maybe_gunzip(body)
     for bom, encoding, length in _BOMS:
         if body.startswith(bom):
             return body[length:].decode(encoding, "replace"), encoding, "bom"
@@ -288,7 +304,7 @@ class Fetcher:
 
     # --- one exchange ------------------------------------------------------
 
-    async def _send_once(self, url: str, method: str) -> _Raw:
+    async def _send_once(self, url: str, method: str, force_read: bool = False) -> _Raw:
         assert self._client is not None, "use Fetcher as an async context manager"
         cfg = self.config
         started = time.perf_counter()
@@ -301,7 +317,7 @@ class Fetcher:
             mime, _ = split_content_type(headers.get("content-type", ""))
             body = b""
             truncated = False
-            if method != "HEAD" and (mime in TEXTUAL_MIMES or not mime):
+            if method != "HEAD" and (force_read or mime in TEXTUAL_MIMES or not mime):
                 chunks: list[bytes] = []
                 size = 0
                 async for chunk in response.aiter_bytes():
@@ -335,7 +351,8 @@ class Fetcher:
             attempts=1,
         )
 
-    async def _send_with_retries(self, url: str, method: str) -> _Raw:
+    async def _send_with_retries(self, url: str, method: str,
+                                 force_read: bool = False) -> _Raw:
         cfg = self.config
         host = urlsplit(url).netloc
         last_failure: FetchFailure | None = None
@@ -344,7 +361,7 @@ class Fetcher:
             await self._pace(host)
             async with self._semaphore:
                 try:
-                    raw = await self._send_once(url, method)
+                    raw = await self._send_once(url, method, force_read)
                 except Exception as exc:  # noqa: BLE001 — mapped, never swallowed
                     kind, detail = classify_exception(exc)
                     last_failure = FetchFailure(kind, detail)
@@ -377,6 +394,7 @@ class Fetcher:
         depth: int = 0,
         referrer: str | None = None,
         method: str = "GET",
+        force_read: bool = False,
     ) -> Page:
         """Fetch one URL, following redirects by hand so every hop is recorded."""
         cfg = self.config
@@ -387,7 +405,7 @@ class Fetcher:
 
         try:
             for _ in range(cfg.max_redirects + 1):
-                raw = await self._send_with_retries(current, method)
+                raw = await self._send_with_retries(current, method, force_read)
                 page.requests += raw.attempts
                 page.retries += raw.attempts - 1
 
@@ -440,7 +458,7 @@ class Fetcher:
         page.timing.ttfb_ms = round(raw.ttfb_ms, 1)
         page.timing.download_ms = round(raw.download_ms, 1)
 
-        if raw.body and (mime in TEXTUAL_MIMES or not mime):
+        if raw.body and (mime in TEXTUAL_MIMES or not mime or raw.body[:2] == b"\x1f\x8b"):
             text, charset, source = decode_body(raw.body, header_charset)
             page.html = text
             page.charset = charset

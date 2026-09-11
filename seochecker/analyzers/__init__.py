@@ -4,7 +4,10 @@ Importing this package registers every check. Order of import does not matter â€
 findings are sorted by severity before they are reported.
 """
 
-from .base import PageContext, run_page_analyzers, REGISTRY  # noqa: F401
+from .base import (  # noqa: F401
+    PageContext, REGISTRY, SITE_REGISTRY, SiteContext,
+    run_page_analyzers, run_site_analyzers,
+)
 
 from . import (  # noqa: F401  (imported for the side effect of registering)
     content,
@@ -13,9 +16,14 @@ from . import (  # noqa: F401  (imported for the side effect of registering)
     images,
     links,
     meta,
+    site,
     social,
     structured,
     technical,
+    urls,
 )
 
-__all__ = ["PageContext", "run_page_analyzers", "REGISTRY"]
+__all__ = [
+    "PageContext", "SiteContext", "REGISTRY", "SITE_REGISTRY",
+    "run_page_analyzers", "run_site_analyzers",
+]

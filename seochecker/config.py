@@ -47,6 +47,8 @@ class CrawlConfig:
     include_patterns: list[re.Pattern[str]] = field(default_factory=list)
     exclude_patterns: list[re.Pattern[str]] = field(default_factory=list)
     obey_robots: bool = True
+    use_sitemap: bool = True
+    max_time: float = 0.0   # seconds; 0 = no limit
 
     # --- politeness ---------------------------------------------------------
     concurrency: int = 5
@@ -134,6 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
                        metavar="REGEX", help="skip URLs matching (repeatable)")
     scope.add_argument("--ignore-robots", dest="obey_robots", action="store_false",
                        help="ignore robots.txt — only for sites you own")
+    scope.add_argument("--no-sitemap", dest="use_sitemap", action="store_false",
+                       help="do not seed the crawl from sitemaps")
+    scope.add_argument("--max-time", type=float, default=0.0, metavar="SECONDS",
+                       help="stop crawling after this long (0 = no limit)")
 
     pol = p.add_argument_group("politeness")
     pol.add_argument("-c", "--concurrency", type=int, default=5)
@@ -192,6 +198,8 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         include_patterns=[re.compile(r) for r in args.include_patterns],
         exclude_patterns=[re.compile(r) for r in args.exclude_patterns],
         obey_robots=args.obey_robots,
+        use_sitemap=args.use_sitemap,
+        max_time=args.max_time,
         concurrency=args.concurrency,
         delay=args.delay,
         jitter=args.jitter,
