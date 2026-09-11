@@ -44,6 +44,8 @@ pipe the report while still watching the run:
 | `--include` / `--exclude` | Regex filters on URLs (repeatable) |
 | `--no-sitemap` | Don't seed the crawl from sitemaps |
 | `--ignore-robots` | Ignore robots.txt — only for sites you own |
+| `--check-external` | Also verify external links resolve (requests to third-party servers) |
+| `--no-soft-404-probe` | Skip the single request that tests how the site handles a missing URL |
 | `--delay 1.0` | Minimum seconds between requests to one host |
 | `--timeout 30` | Per-request timeout |
 | `--retries 3` | Retries on timeouts, connection errors and 429/5xx |
@@ -108,9 +110,40 @@ a fix.
 | `content` | empty (JS-rendered), very thin, thin, low text-to-HTML ratio, app-shell detection |
 | `url` | too long, too deep, uppercase, underscores, session IDs, too many parameters |
 
-Plus whole-crawl checks: `robots.*` (missing, unreachable, blocking everything,
-no sitemap declared), `sitemap.*` (missing, unreadable, broken/redirecting/
-noindexed/non-canonical entries) and `crawl.*`.
+## What it finds across the whole site
+
+Checks that need the finished crawl rather than one page:
+
+| Category | Checks |
+| --- | --- |
+| `duplicate` | identical or near-identical titles, meta descriptions, H1s and body content |
+| `structure` | orphan pages, pages unreachable by following links, pages more than 3 clicks deep, dead ends, broken internal links *with the pages that contain them*, links pointing at redirects, soft 404s |
+| `sitemap` | missing, partly unreadable, and entries that 404, redirect, are `noindex` or canonicalise elsewhere |
+| `robots` | missing, unreachable, blocking the entire site, no sitemap declared |
+| `crawl` | parameter explosion from faceted navigation, URLs blocked by robots.txt |
+| `external` | broken outbound links (with `--check-external`) |
+
+### Internal PageRank
+
+The report includes a PageRank computed over the site's own internal link graph:
+where authority actually pools, which pages are orphaned, and how many clicks
+each page is from the homepage. No third-party API is involved, and it answers
+the question people usually mean when they ask about authority.
+
+### Near-duplicate detection
+
+Pages are compared with a bottom-k MinHash sketch, which estimates what
+proportion of their content two pages share — so a finding reads "these two pages
+are 80% identical" rather than an opaque distance.
+
+The 60% threshold is calibrated, not guessed. Measured across a crawl of
+wordpress.org, genuinely unrelated pages on the same site sit at 10% median
+similarity and 16% at the 90th percentile, while its one real near-duplicate pair
+— two nearly identical privacy request forms — measures 62%. Tune it via
+`Thresholds.near_duplicate_similarity`.
+
+Pages that declare themselves duplicates, by `noindex` or by canonicalising
+elsewhere, are excluded. That is the fix, not the fault.
 
 Severities are `critical`, `warning`, `notice`, `info`. A page that is blocked or
 fails to fetch reports **only that** — a bot-mitigation challenge page is never
@@ -198,6 +231,8 @@ seochecker/
   urls.py                normalization and scope rules
   robots.py              robots.txt parser (RFC 9309)
   sitemap.py             sitemap, sitemapindex, gzip and plain-text forms
+  graph.py               internal link graph: PageRank, click depth, orphans
+  similarity.py          MinHash sketches for near-duplicate detection
   fingerprint/
     rules.yaml           68 technologies, 136 signals — data, not code
     detect.py            rules engine, confidence scoring, implications
@@ -210,4 +245,5 @@ tests/test_fetch.py       fetch layer: redirects, retries, failures
 tests/test_analyzers.py   on-page checks, including false-positive guards
 tests/test_fingerprint.py rules engine, confidence, implications
 tests/test_crawl.py       scope, dedup, robots, sitemap, limits
+tests/test_sitewide.py    duplicates, link graph, soft 404s, external links
 ```

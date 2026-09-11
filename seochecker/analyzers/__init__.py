@@ -11,6 +11,7 @@ from .base import (  # noqa: F401
 
 from . import (  # noqa: F401  (imported for the side effect of registering)
     content,
+    duplicates,
     headings,
     i18n,
     images,
@@ -18,6 +19,7 @@ from . import (  # noqa: F401  (imported for the side effect of registering)
     meta,
     site,
     social,
+    structure,
     structured,
     technical,
     urls,

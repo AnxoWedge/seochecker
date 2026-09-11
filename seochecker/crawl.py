@@ -8,6 +8,7 @@ lives here is the decision of *what* to ask for, and when to stop.
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -19,9 +20,11 @@ from .config import CrawlConfig
 from .fetch import Fetcher
 from .frontier import Frontier, Task
 from .fingerprint import Detection, Fingerprinter
+from .graph import LinkGraph
 from .html import Document
 from .models import Finding, Page
 from .robots import RobotsTxt, parse as parse_robots, product_token
+from .similarity import content_hash, sketch
 from .sitemap import SitemapSet, load_sitemaps
 from .thresholds import Thresholds
 from .urls import Scope, normalize
@@ -38,6 +41,10 @@ FINGERPRINT_SAMPLE = 5
 # pass once links run out, gets both.
 SITEMAP_SEED_SHARE = 4
 
+# Checking external links means requests to servers that did not ask for our
+# traffic, so it is opt-in and capped.
+MAX_EXTERNAL_CHECKS = 500
+
 
 @dataclass
 class CrawlResult:
@@ -46,6 +53,9 @@ class CrawlResult:
     site_findings: list[Finding] = field(default_factory=list)
     robots: RobotsTxt = field(default_factory=RobotsTxt)
     sitemap: SitemapSet = field(default_factory=SitemapSet)
+    graph: LinkGraph = field(default_factory=LinkGraph)
+    soft_404_fingerprint: tuple = ()
+    external_links: dict = field(default_factory=dict)
     frontier: dict[str, Any] = field(default_factory=dict)
     stats: dict[str, Any] = field(default_factory=dict)
     stopped_because: str = ""
@@ -106,6 +116,19 @@ class Crawler:
         # Never speed up because robots.txt permits it — only ever slow down.
         fetcher.host_delay[host] = max(self.config.delay, declared)
 
+    async def _probe_soft_404(self, fetcher: Fetcher) -> tuple[int, ...]:
+        """Ask for a URL that cannot exist, and fingerprint whatever comes back.
+
+        A correct site answers 404 and there is nothing to do. A site that
+        answers 200 has soft 404s, and this fingerprint identifies them.
+        """
+        origin = f"{urlsplit(self.config.url).scheme}://{urlsplit(self.config.url).netloc}"
+        probe = f"{origin}/{secrets.token_hex(12)}-seocheck-probe"
+        page = await fetcher.fetch(probe)
+        if page.error is not None or not page.ok or not page.html:
+            return ()
+        return sketch(Document(page.html, page.final_url).text)
+
     async def _discover_sitemaps(self, fetcher: Fetcher) -> SitemapSet:
         seeds = list(self.result.robots.sitemaps)
         if not seeds:
@@ -139,6 +162,22 @@ class Crawler:
                 current = self._merged.get(detection.name)
                 if current is None or detection.confidence > current.confidence:
                     self._merged[detection.name] = detection
+
+        if doc is not None:
+            # Keep what whole-site analysis needs; the parsed document itself is
+            # far too large to hold for every page of a 500-page crawl.
+            page.seo = doc.summary()
+            page.content_hash = content_hash(doc.text)
+            page.sketch = sketch(doc.text)
+            internal: list[str] = []
+            external: list[str] = []
+            for link in doc.links:
+                target = normalize(link.url)
+                bucket = internal if self.scope.allows(target) else external
+                if target not in bucket:
+                    bucket.append(target)
+            page.outlinks = internal
+            page.external_links = external
 
         page.findings = run_page_analyzers(
             PageContext(page=page, doc=doc, config=self.config,
@@ -180,6 +219,26 @@ class Crawler:
                 accepted += 1
         return index
 
+    async def _check_external_links(self, fetcher: Fetcher) -> dict[str, Page]:
+        """HEAD every distinct external link, falling back to GET where HEAD is refused."""
+        targets = sorted({url for page in self.result.pages for url in page.external_links})
+        if len(targets) > MAX_EXTERNAL_CHECKS:
+            targets = targets[:MAX_EXTERNAL_CHECKS]
+
+        results: dict[str, Page] = {}
+        limit = asyncio.Semaphore(min(4, max(1, self.config.concurrency)))
+
+        async def check(url: str) -> None:
+            async with limit:
+                page = await fetcher.fetch(url, method="HEAD")
+                # Plenty of servers answer HEAD with 403/405 while serving GET fine.
+                if page.error is not None or (page.status or 0) in (403, 405, 501):
+                    page = await fetcher.fetch(url, method="GET")
+                results[url] = page
+
+        await asyncio.gather(*(check(url) for url in targets), return_exceptions=True)
+        return results
+
     def _out_of_time(self) -> bool:
         budget = self.config.max_time
         return bool(budget) and (time.perf_counter() - self._started) > budget
@@ -192,6 +251,9 @@ class Crawler:
             if config.obey_robots:
                 self.result.robots = await self._load_robots(fetcher)
                 self._apply_crawl_delay(fetcher)
+
+            if config.probe_soft_404:
+                self.result.soft_404_fingerprint = await self._probe_soft_404(fetcher)
 
             if config.use_sitemap:
                 self.result.sitemap = await self._discover_sitemaps(fetcher)
@@ -241,6 +303,9 @@ class Crawler:
                 task.cancel()
             await asyncio.gather(*workers, return_exceptions=True)
 
+            if config.check_external and not self._out_of_time():
+                self.result.external_links = await self._check_external_links(fetcher)
+
             self.result.stats = {
                 "requests": fetcher.requests_made,
                 "bytes_downloaded": fetcher.bytes_downloaded,
@@ -250,6 +315,9 @@ class Crawler:
 
         if self.frontier.full and not self.result.stopped_because:
             self.result.stopped_because = f"page limit ({config.max_pages}) reached"
+
+        self.result.graph = LinkGraph.build(self.result.pages, config.url)
+        self.result.graph.apply_to(self.result.pages)
 
         self.result.technologies = sorted(
             self._merged.values(), key=lambda d: (-d.confidence, d.category, d.name)

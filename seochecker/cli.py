@@ -80,6 +80,9 @@ async def run_crawl(config: CrawlConfig, on_page=None) -> CrawlResult:
             frontier=result.frontier,
             technologies=result.technologies,
             thresholds=Thresholds(),
+            graph=result.graph,
+            soft_404_fingerprint=result.soft_404_fingerprint,
+            external_links=result.external_links,
         )
     )
     return result
@@ -125,9 +128,11 @@ def build_crawl_report(config: CrawlConfig, result: CrawlResult) -> dict[str, An
             },
         },
         "summary": summarise(all_findings),
+        "graph": result.graph.summary(),
         "technologies": [tech.to_dict() for tech in result.technologies],
         "site_findings": [_finding_dict(f) for f in result.site_findings],
-        "pages": [p.to_dict(include_html=config.include_html) for p in result.pages],
+        "pages": [p.to_dict(include_html=config.include_html,
+                            include_links=config.include_links) for p in result.pages],
     }
 
 
@@ -322,6 +327,30 @@ def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) ->
                                                list(skipped.items())[:5]))
     console.print()
     console.print(overview)
+
+    graph = result.graph
+    if len(graph.nodes) > 1:
+        structure = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+        structure.add_column(style="dim", width=15)
+        structure.add_column(overflow="fold")
+        edges = sum(len(targets) for targets in graph.outgoing.values())
+        structure.add_row("link graph",
+                          f"{len(graph.nodes)} pages · {edges} internal links · "
+                          f"deepest page {max(graph.click_depth.values(), default=0)} "
+                          f"clicks from home")
+        if orphans := graph.orphans():
+            structure.add_row("orphans", f"[yellow]{len(orphans)}[/yellow] page(s) with no "
+                                         f"inbound internal link")
+        if unreachable := graph.unreachable():
+            structure.add_row("unreachable", f"[yellow]{len(unreachable)}[/yellow] page(s) not "
+                                             f"reachable by following links from the start URL")
+        structure.add_row(
+            "authority",
+            " · ".join(f"{_short(url, config.url)} [dim]{score:.1%}[/dim]"
+                       for url, score in graph.top_by_pagerank(4)),
+        )
+        console.print("\n[bold]Structure[/bold] [dim](authority = internal PageRank)[/dim]")
+        console.print(structure)
 
     render_technologies(console, result.technologies)
 

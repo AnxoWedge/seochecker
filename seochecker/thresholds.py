@@ -33,6 +33,9 @@ class Thresholds:
     render_blocking_warn: int = 3
     redirect_chain_warn: int = 2
 
+    # See similarity.py for how this number was arrived at.
+    near_duplicate_similarity: float = 0.60
+
     url_max_length: int = 115
     url_max_depth: int = 4
     url_max_params: int = 2

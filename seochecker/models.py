@@ -99,6 +99,19 @@ class Page:
     referrer: str | None = None
     from_cache: bool = False
     from_sitemap: bool = False   # discovered via sitemap, not by a link
+
+    # Captured during the crawl so whole-site analysis has something to work
+    # with once the parsed document is gone.
+    seo: dict[str, Any] = field(default_factory=dict)
+    outlinks: list[str] = field(default_factory=list)        # normalized, in scope
+    external_links: list[str] = field(default_factory=list)
+    content_hash: str = ""                 # exact fingerprint of the visible text
+    sketch: tuple[int, ...] = ()           # MinHash sketch, for near-duplicates
+
+    # Filled in after the crawl, from the link graph.
+    pagerank: float = 0.0
+    click_depth: int | None = None
+    inlink_count: int = 0
     rendered: bool = False
     findings: list[Finding] = field(default_factory=list)
 
@@ -122,7 +135,8 @@ class Page:
         """Case-insensitive header lookup."""
         return self.headers.get(name.lower(), default)
 
-    def to_dict(self, *, include_html: bool = False) -> dict[str, Any]:
+    def to_dict(self, *, include_html: bool = False,
+                include_links: bool = False) -> dict[str, Any]:
         data = asdict(self)
         data["error"] = self.error.value if self.error else None
         data["findings"] = [
@@ -130,9 +144,20 @@ class Page:
         ]
         data["ok"] = self.ok
         data["is_html"] = self.is_html
+        # The raw link lists are an internal artifact — on a 500-page crawl they
+        # would dominate the report. The counts and graph metrics are the useful
+        # part; `include_links` brings the lists back for debugging.
+        data["outlink_count"] = len(self.outlinks)
+        data["external_link_count"] = len(self.external_links)
+        if not include_links:
+            data.pop("outlinks", None)
+            data.pop("external_links", None)
+        # 128 integers per page is pure noise in a report.
+        data.pop("sketch", None)
         if not include_html:
             data.pop("html", None)
         return data
 
     def to_json(self, *, include_html: bool = False, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(include_html=include_html), indent=indent, ensure_ascii=False)
+        return json.dumps(self.to_dict(include_html=include_html), indent=indent,
+                          ensure_ascii=False)

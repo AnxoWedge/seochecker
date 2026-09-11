@@ -48,6 +48,8 @@ class CrawlConfig:
     exclude_patterns: list[re.Pattern[str]] = field(default_factory=list)
     obey_robots: bool = True
     use_sitemap: bool = True
+    probe_soft_404: bool = True
+    check_external: bool = False
     max_time: float = 0.0   # seconds; 0 = no limit
 
     # --- politeness ---------------------------------------------------------
@@ -75,6 +77,7 @@ class CrawlConfig:
     # --- output -------------------------------------------------------------
     out: str | None = None
     include_html: bool = False
+    include_links: bool = False
     min_severity: str = "info"
     fail_on: str = "never"
     quiet: bool = False
@@ -138,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
                        help="ignore robots.txt — only for sites you own")
     scope.add_argument("--no-sitemap", dest="use_sitemap", action="store_false",
                        help="do not seed the crawl from sitemaps")
+    scope.add_argument("--no-soft-404-probe", dest="probe_soft_404", action="store_false",
+                       help="skip the one request that tests how the site handles a "
+                            "URL that does not exist")
+    scope.add_argument("--check-external", action="store_true",
+                       help="also check that external links resolve (one HEAD request "
+                            "per external URL, to third-party servers)")
     scope.add_argument("--max-time", type=float, default=0.0, metavar="SECONDS",
                        help="stop crawling after this long (0 = no limit)")
 
@@ -175,6 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="write the JSON report here instead of stdout")
     out.add_argument("--include-html", action="store_true",
                      help="keep raw HTML in the JSON output (large)")
+    out.add_argument("--include-links", action="store_true",
+                     help="keep the per-page link lists in the JSON output (large)")
     out.add_argument("--min-severity", choices=["critical", "warning", "notice", "info"],
                      default="info", help="hide findings below this severity in the terminal")
     out.add_argument("--fail-on", choices=["critical", "warning", "notice", "never"],
@@ -199,6 +210,8 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         exclude_patterns=[re.compile(r) for r in args.exclude_patterns],
         obey_robots=args.obey_robots,
         use_sitemap=args.use_sitemap,
+        probe_soft_404=args.probe_soft_404,
+        check_external=args.check_external,
         max_time=args.max_time,
         concurrency=args.concurrency,
         delay=args.delay,
@@ -218,6 +231,7 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         min_confidence=args.min_confidence,
         out=args.out,
         include_html=args.include_html,
+        include_links=args.include_links,
         min_severity=args.min_severity,
         fail_on=args.fail_on,
         quiet=args.quiet,

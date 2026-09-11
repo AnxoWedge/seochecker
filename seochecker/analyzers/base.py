@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from ..config import CrawlConfig
 from ..html import Document
 from ..models import Finding, Page, Severity
+from ..graph import LinkGraph
 from ..robots import RobotsTxt
 from ..sitemap import SitemapSet
 from ..thresholds import Thresholds
@@ -67,6 +68,34 @@ class SiteContext:
     frontier: dict = field(default_factory=dict)
     technologies: list = field(default_factory=list)
     thresholds: Thresholds = field(default_factory=Thresholds)
+    graph: LinkGraph = field(default_factory=LinkGraph)
+    soft_404_fingerprint: tuple = ()
+    external_links: dict = field(default_factory=dict)   # url -> Page, when checked
+
+    @property
+    def indexable_pages(self) -> list[Page]:
+        """Pages a search engine would actually consider for the index.
+
+        Excludes errors, non-200s, noindex, and pages that canonicalise
+        elsewhere — a deliberate duplicate is not a duplicate problem.
+        """
+        from ..urls import normalize
+        out = []
+        for page in self.pages:
+            if page.error is not None or not page.ok or not page.is_html:
+                continue
+            directives = set()
+            if header := page.header("x-robots-tag"):
+                directives |= parse_directives([header])
+            if robots_meta := (page.seo or {}).get("robots_meta"):
+                directives |= parse_directives([robots_meta])
+            if directives & {"noindex", "none"}:
+                continue
+            canonical = (page.seo or {}).get("canonical") or ""
+            if canonical and normalize(canonical) != normalize(page.final_url):
+                continue
+            out.append(page)
+        return out
 
     @property
     def html_pages(self) -> list[Page]:
