@@ -14,9 +14,11 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import __version__
 from .analyzers import PageContext, SiteContext, run_page_analyzers, run_site_analyzers
+from .compare import Comparison, SiteMetrics
 from .crawl import CrawlResult, Crawler
 from .config import CrawlConfig, config_from_args
 from .fetch import Fetcher
@@ -110,8 +112,38 @@ def scorecard(config: CrawlConfig, result: CrawlResult) -> Scorecard:
     )
 
 
+async def run_comparison(config: CrawlConfig, on_page=None,
+                         should_stop=None) -> tuple[CrawlResult, Scorecard, Comparison]:
+    """Crawl the target and every rival to the same budget, then compare.
+
+    The rival crawls run concurrently because they are different hosts — pacing is
+    per-host, so nobody is asked for more than they would be in a solo crawl.
+    """
+    from dataclasses import replace
+
+    configs = [config] + [replace(config, url=rival, against=[]) for rival in config.against]
+    results = await asyncio.gather(*(
+        run_crawl(cfg, on_page=on_page if index == 0 else None, should_stop=should_stop)
+        for index, cfg in enumerate(configs)
+    ))
+
+    cards = [scorecard(cfg, result) for cfg, result in zip(configs, results)]
+    metrics = [SiteMetrics.from_result(result, card, config.max_pages)
+               for result, card in zip(results, cards)]
+    # SiteMetrics reads the target URL off the first page, which a failed crawl
+    # does not have; fall back to what was asked for.
+    for site, cfg in zip(metrics, configs):
+        if not site.url:
+            site.url = cfg.url
+            site.host = urlsplit(cfg.url).netloc
+
+    comparison = Comparison(target=metrics[0], rivals=metrics[1:], budget=config.max_pages)
+    return results[0], cards[0], comparison
+
+
 def build_crawl_report(config: CrawlConfig, result: CrawlResult,
-                       card: Scorecard | None = None) -> dict[str, Any]:
+                       card: Scorecard | None = None,
+                       comparison: Comparison | None = None) -> dict[str, Any]:
     return {
         "seochecker": __version__,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -148,6 +180,7 @@ def build_crawl_report(config: CrawlConfig, result: CrawlResult,
             },
         },
         "score": card.to_dict() if card else None,
+        "comparison": comparison.to_dict() if comparison else None,
         "summary": summarise(all_findings(result)),
         "graph": result.graph.summary(),
         "technologies": [tech.to_dict() for tech in result.technologies],
@@ -457,6 +490,65 @@ def _short(url: str, target: str) -> str:
     return url
 
 
+def render_comparison(comparison: Comparison, minimum: Severity) -> None:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    console = Console(stderr=True)
+    sites = comparison.sites
+
+    console.print(f"\n[bold]Comparison[/bold] [dim]· {comparison.budget} page budget each · "
+                  f"{len(comparison.rivals)} rival(s)[/dim]")
+
+    table = Table(box=None, padding=(0, 2, 0, 0), header_style="dim")
+    table.add_column("", width=30)
+    for index, site in enumerate(sites):
+        table.add_column(site.host or "?", justify="right",
+                         style="bold" if index == 0 else "")
+
+    scores = []
+    for index, site in enumerate(sites):
+        colour = "green" if site.score >= 80 else "yellow" if site.score >= 60 else "red"
+        scores.append(Text(f"{site.score:.0f} ({site.grade})", style=colour))
+    table.add_row(Text("Score", style="bold"), *scores)
+
+    for row in comparison.metric_table():
+        cells = [Text(cell["text"], style="green" if cell["best"] else "")
+                 for cell in row["cells"]]
+        table.add_row(row["label"], *cells)
+    console.print()
+    console.print(table)
+
+    if gaps := comparison.category_gaps():
+        console.print("\n[bold]Where a rival is ahead[/bold]")
+        for gap in gaps:
+            console.print(f"  [yellow]{gap.label:<14}[/yellow] {gap.detail:<14} "
+                          f"[dim]{', '.join(gap.rivals)}[/dim]")
+
+    if schema := comparison.schema_gaps():
+        console.print("\n[bold]Structured data they mark up and you do not[/bold]")
+        for gap in schema[:12]:
+            console.print(f"  [cyan]{gap.label:<26}[/cyan] [dim]{', '.join(gap.rivals)}[/dim]")
+        if len(schema) > 12:
+            console.print(f"  [dim]… and {len(schema) - 12} more[/dim]")
+
+    if tech := comparison.technology_gaps():
+        console.print("\n[bold]Technology they run and you do not[/bold]")
+        for gap in tech[:14]:
+            console.print(f"  [dim]{gap.detail:<14}[/dim] {gap.label:<24} "
+                          f"[dim]{', '.join(gap.rivals)}[/dim]")
+        if len(tech) > 14:
+            console.print(f"  [dim]… and {len(tech) - 14} more[/dim]")
+
+    if strengths := comparison.strengths():
+        console.print("\n[bold]Where you are ahead[/bold]")
+        for gap in strengths:
+            console.print(f"  [green]{gap.label:<14}[/green] {gap.detail}")
+
+    console.print(f"\n[dim]{comparison.disclaimer}[/dim]\n")
+
+
 def crawl_exit_code(result: CrawlResult, fail_on: str) -> int:
     if not result.pages:
         return 1
@@ -489,10 +581,19 @@ def _write(payload: str, config: CrawlConfig) -> None:
         print(payload)
 
 
-def _crawl_with_progress(config: CrawlConfig) -> CrawlResult:
-    """Run the crawl, showing live progress on stderr unless --quiet."""
+def _crawl_with_progress(config: CrawlConfig):
+    """Run the crawl (and any rival crawls), showing live progress unless --quiet.
+
+    Returns (result, scorecard, comparison-or-None).
+    """
+    def go(on_page=None):
+        if config.against:
+            return asyncio.run(run_comparison(config, on_page=on_page))
+        result = asyncio.run(run_crawl(config, on_page=on_page))
+        return result, scorecard(config, result), None
+
     if config.quiet:
-        return asyncio.run(run_crawl(config))
+        return go()
 
     from rich.console import Console
     from rich.progress import (
@@ -519,11 +620,15 @@ def _crawl_with_progress(config: CrawlConfig) -> CrawlResult:
                 description=f"crawling [dim]{_short(page.final_url, config.url)[:48]}[/dim]",
             )
 
-        return asyncio.run(run_crawl(config, on_page=on_page))
+        if config.against:
+            progress.update(task_id, description=f"crawling {config.url} and "
+                                                 f"{len(config.against)} rival(s)")
+
+        return go(on_page)
 
 
-def write_side_reports(config: CrawlConfig, result: CrawlResult,
-                       card: Scorecard) -> list[str]:
+def write_side_reports(config: CrawlConfig, result: CrawlResult, card: Scorecard,
+                       comparison: Comparison | None = None) -> list[str]:
     """HTML, CSV and the run history. Returns lines to show the user."""
     notes: list[str] = []
     findings = all_findings(result)
@@ -539,6 +644,7 @@ def write_side_reports(config: CrawlConfig, result: CrawlResult,
             crawl=build_crawl_report(config, result)["crawl"],
             stats=result.stats,
             stopped_because=result.stopped_because,
+            comparison=comparison,
         )
         notes.append(f"wrote {write_html(config.html, context)}")
 
@@ -576,17 +682,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if not config.single:
         try:
-            result = _crawl_with_progress(config)
+            result, card, comparison = _crawl_with_progress(config)
         except KeyboardInterrupt:
             print("interrupted", file=sys.stderr)
             return 130
-        card = scorecard(config, result)
-        _write(json.dumps(build_crawl_report(config, result, card), indent=2,
+        _write(json.dumps(build_crawl_report(config, result, card, comparison), indent=2,
                           ensure_ascii=False), config)
-        for note in write_side_reports(config, result, card):
+        for note in write_side_reports(config, result, card, comparison):
             print(note, file=sys.stderr)
         if not config.quiet:
             render_crawl(result, config, Severity(config.min_severity), card)
+            if comparison:
+                render_comparison(comparison, Severity(config.min_severity))
         return crawl_exit_code(result, config.fail_on)
 
     try:

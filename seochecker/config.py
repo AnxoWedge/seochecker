@@ -39,6 +39,7 @@ class CrawlConfig:
     # --- target -------------------------------------------------------------
     url: str
     single: bool = False
+    against: list[str] = field(default_factory=list)  # rival sites to compare with
 
     # --- crawl scope (Phase 4) ---------------------------------------------
     max_pages: int = 500
@@ -150,6 +151,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("url", help="site or page to audit (scheme optional)")
     p.add_argument("--single", action="store_true",
                    help="fetch only this URL, do not crawl")
+    p.add_argument("--against", action="append", default=[], metavar="URL",
+                   help="also crawl this rival site and compare against it (repeatable). "
+                        "Every site gets the same page budget, or it is not a comparison.")
     p.add_argument("--version", action="version", version=f"seochecker {__version__}")
 
     scope = p.add_argument_group("scope")
@@ -249,6 +253,7 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
     return CrawlConfig(
         url=normalize_target(args.url),
         single=args.single,
+        against=[normalize_target(u) for u in args.against],
         max_pages=args.max_pages,
         max_depth=args.max_depth,
         include_subdomains=args.include_subdomains,

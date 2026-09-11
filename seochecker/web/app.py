@@ -42,6 +42,15 @@ def _float(name: str, default: float, low: float, high: float) -> float:
         return default
 
 
+MAX_RIVALS = 4
+
+
+def parse_rivals(raw: str) -> list[str]:
+    """One rival per line or comma. Each is validated the same way the target is."""
+    candidates = [part.strip() for part in re.split(r"[\n,]+", raw or "") if part.strip()]
+    return [normalize_target(candidate) for candidate in candidates[:MAX_RIVALS]]
+
+
 def config_from_form(form) -> CrawlConfig:
     """Build a CrawlConfig from the start form, clamping everything to sane bounds."""
     url = normalize_target(form.get("url", "").strip())
@@ -57,6 +66,7 @@ def config_from_form(form) -> CrawlConfig:
         use_sitemap=not form.get("no_sitemap"),
         check_external=bool(form.get("check_external")),
         render=render if render in RENDER_CHOICES else "auto",
+        against=parse_rivals(form.get("against", "")),
         quiet=True,
     )
 
@@ -134,8 +144,9 @@ def create_app(*, db_path: str | None = None) -> Flask:
         if fmt == "html":
             return _attachment(_report_html(state), f"{host}-report.html", "text/html")
         if fmt == "json":
-            payload = json.dumps(build_crawl_report(state.config, state.result, state.card),
-                                 indent=2, ensure_ascii=False)
+            payload = json.dumps(
+                build_crawl_report(state.config, state.result, state.card, state.comparison),
+                indent=2, ensure_ascii=False)
             return _attachment(payload, f"{host}-report.json", "application/json")
         if fmt == "csv":
             buffer = io.StringIO()
@@ -182,6 +193,7 @@ def create_app(*, db_path: str | None = None) -> Flask:
             crawl=build_crawl_report(state.config, result)["crawl"],
             stats=result.stats,
             stopped_because=result.stopped_because,
+            comparison=state.comparison,
         ))
 
     def _attachment(body: str, filename: str, mimetype: str) -> Response:

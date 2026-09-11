@@ -12,6 +12,14 @@
            value="{{ request.form.get('url', '') }}">
     <div class="note">The scheme is optional. Crawls stay on this site unless you allow subdomains.</div>
 
+    <label for="against" style="margin-top:18px">Compare against (optional)</label>
+    <input type="text" id="against" name="against"
+           placeholder="rival-a.com, rival-b.com"
+           value="{{ request.form.get('against', '') }}">
+    <div class="note">Up to four rivals, comma separated. Every site is crawled to the same
+      page budget under the same politeness rules — a crawl sees pages, not backlinks or
+      rankings.</div>
+
     <div class="grid" style="margin-top:18px">
       <div><label for="max_pages">Page budget</label>
         <input type="number" id="max_pages" name="max_pages" value="50" min="1" max="5000"></div>

@@ -36,6 +36,13 @@ Crawl a site and produce a report you can send to someone:
 ./venv/bin/python seocheck.py example.com --html out/report.html -o out/report.json
 ```
 
+Compare against rivals:
+
+```bash
+./venv/bin/python seocheck.py mysite.com --against rival-a.com --against rival-b.com \
+  --max-pages 50 --html report.html
+```
+
 Or audit a single page:
 
 ```bash
@@ -54,6 +61,7 @@ pipe the report while still watching the run:
 | Flag | What it does |
 | --- | --- |
 | `--single` | Audit one URL instead of crawling |
+| `--against rival.com` | Also crawl this rival and compare against it (repeatable) |
 | `--max-pages 200` | Page budget for the crawl (default 500) |
 | `--max-depth 3` | How many links deep to follow (default 5) |
 | `--max-time 600` | Stop after this many seconds |
@@ -157,6 +165,41 @@ When a page is rendered, the crawler:
   served HTML
 
 Rendering costs roughly 1-10 seconds per page, hence `--max-render`.
+
+## Comparing against rivals
+
+`--against` crawls each rival to the **same page budget** as the target — a
+comparison of 200 pages against 12 is not a comparison — under the same politeness
+rules, with their robots.txt respected exactly like yours. Rival crawls run
+concurrently because they are different hosts, so no single site is asked for more
+than it would be in a solo crawl.
+
+The report gains a side-by-side table (content volume, thin-page share, structured
+data coverage, internal linking, click depth, HTTPS, compression, HTTP version,
+server response time, HTML weight), plus three lists:
+
+- **Where a rival is ahead** — category scores they beat you on by a meaningful margin
+- **Structured data they mark up and you do not** — usually the most actionable gap,
+  since schema markup is a direct request for rich results and costs only the markup
+- **Technology they run and you do not** — CDN, analytics, consent, page builders
+
+And **where you are ahead**, which only counts when you beat every rival.
+
+### What this cannot tell you
+
+A crawl sees what is on the pages: markup, structure, technology, delivery. It
+cannot see backlinks, traffic, or rankings. So this answers "what are they doing on
+their pages that we are not" and never "who ranks better". That sentence is printed
+in the report itself, because a comparison like this is easy to over-read.
+
+Real example — `wordpress.org` against `ghost.org`, ten pages each:
+
+| | wordpress.org | ghost.org |
+| --- | ---: | ---: |
+| Score | 75 (C) | **86 (B)** |
+| Median words per page | 482 | **889** |
+| Pages with structured data | 20% | **100%** |
+| Median server response | 364ms | **65ms** |
 
 ## Not getting blocked
 
@@ -363,6 +406,7 @@ seochecker/
     app.py runner.py     the dashboard: routes, and crawls on background threads
     templates/           its pages
   score.py               the scoring model, and the calibration behind it
+  compare.py             rival comparison: metrics and gap analysis
   report/
     html_out.py          self-contained HTML report
     template.html.j2     its markup, styles and interactions
@@ -384,4 +428,5 @@ tests/test_render.py      the render heuristic, and rendering end to end
 tests/test_report.py      the scoring calibration table, and the report writers
 tests/test_politeness.py  pacing, the circuit breaker, and the cache
 tests/test_web.py         the dashboard, end to end
+tests/test_compare.py     comparison metrics, gaps, and the equal-budget contract
 ```

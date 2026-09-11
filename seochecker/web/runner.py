@@ -16,8 +16,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..cli import run_crawl, scorecard
+from ..cli import run_comparison, run_crawl, scorecard
 from ..config import CrawlConfig
+from ..compare import Comparison
 from ..crawl import CrawlResult
 from ..models import Severity
 from ..score import Scorecard
@@ -45,6 +46,7 @@ class RunState:
         "critical": 0, "warning": 0, "notice": 0, "info": 0})
     result: CrawlResult | None = None
     card: Scorecard | None = None
+    comparison: Comparison | None = None
     error: str = ""
     stop_event: threading.Event = field(default_factory=threading.Event)
 
@@ -70,6 +72,7 @@ class RunState:
             "score": round(self.card.overall, 1) if self.card else None,
             "grade": self.card.grade if self.card else None,
             "stopped_because": self.result.stopped_because if self.result else "",
+            "rivals": list(self.config.against),
         }
 
 
@@ -127,11 +130,18 @@ class RunManager:
                 state.counts[severity.value] += tally[severity]
 
         try:
-            result = asyncio.run(run_crawl(
-                state.config, on_page=on_page, should_stop=state.stop_event.is_set,
-            ))
+            if state.config.against:
+                result, card, comparison = asyncio.run(run_comparison(
+                    state.config, on_page=on_page, should_stop=state.stop_event.is_set,
+                ))
+                state.comparison = comparison
+            else:
+                result = asyncio.run(run_crawl(
+                    state.config, on_page=on_page, should_stop=state.stop_event.is_set,
+                ))
+                card = scorecard(state.config, result)
             state.result = result
-            state.card = scorecard(state.config, result)
+            state.card = card
             # Site-level findings only exist once the crawl finishes.
             site_tally = Counter(f.severity for f in result.site_findings)
             for severity in Severity:

@@ -44,6 +44,7 @@ header{display:flex;flex-wrap:wrap;gap:24px;align-items:center;justify-content:s
 .card .n{font-size:24px;font-weight:650;letter-spacing:-.02em}
 .card .l{color:var(--muted);font-size:12px;margin-top:2px}
 .c-critical{color:var(--critical)} .c-warning{color:var(--warning)}
+.c-best{color:var(--accent);font-weight:650}
 .c-notice{color:var(--notice)} .c-info{color:var(--info)}
 
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -141,6 +142,82 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
   <div class="card"><div class="n{{ ' c-warning' if graph.orphans else '' }}">{{ graph.orphans }}</div><div class="l">orphan pages</div></div>
   {% endif %}
 </div>
+
+{% if comparison %}
+<h2>Compared with {{ comparison.rivals|length }} rival{{ '' if comparison.rivals|length == 1 else 's' }}</h2>
+<div class="panel"><div class="inner"><table>
+  <thead><tr><th></th>
+    {% for s in comparison_scores %}<th style="text-align:right">{{ s.host }}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+    <tr><td><b>Score</b></td>
+      {% for s in comparison_scores %}
+        <td style="text-align:right"><b>{{ s.score|round|int }}</b>
+          <span style="color:var(--muted)">{{ s.grade }}</span></td>
+      {% endfor %}
+    </tr>
+    {% for row in comparison_metrics %}
+      <tr><td style="color:var(--muted)">{{ row.label }}</td>
+        {% for cell in row.cells %}
+          <td style="text-align:right" class="mono{{ ' c-best' if cell.best }}">{{ cell.text }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+  </tbody>
+</table></div>
+<div style="padding:12px 16px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px">
+  {{ comparison.budget }}-page budget for every site. {{ comparison.disclaimer }}
+</div></div>
+
+{% if comparison.gaps.categories %}
+<h2>Where a rival is ahead</h2>
+<div class="panel"><div class="inner"><table><tbody>
+  {% for gap in comparison.gaps.categories %}
+    <tr><td style="width:170px"><b>{{ gap.label }}</b></td>
+      <td class="mono">{{ gap.detail }}</td>
+      <td style="color:var(--muted)">{{ gap.rivals|join(', ') }}</td></tr>
+  {% endfor %}
+</tbody></table></div></div>
+{% endif %}
+
+{% if comparison.gaps.schema %}
+<h2>Structured data they mark up and you do not</h2>
+<div class="panel"><div class="inner" style="padding:14px">
+  <div class="chips">
+  {% for gap in comparison.gaps.schema %}
+    <span class="chip" title="{{ gap.rivals|join(', ') }}"><b>{{ gap.label }}</b></span>
+  {% endfor %}
+  </div>
+  <div style="color:var(--muted);font-size:12.5px;margin-top:10px">
+    Often the most actionable gap on this page: schema markup is a direct request for
+    rich results, and it costs nothing but the markup.</div>
+</div></div>
+{% endif %}
+
+{% if comparison.gaps.technology %}
+<h2>Technology they run and you do not</h2>
+<div class="panel"><div class="inner"><table>
+  <thead><tr><th style="width:150px">Category</th><th>Technology</th><th>Used by</th></tr></thead>
+  <tbody>
+  {% for gap in comparison.gaps.technology %}
+    <tr><td style="color:var(--muted)">{{ gap.detail }}</td>
+      <td><b>{{ gap.label }}</b></td>
+      <td style="color:var(--muted)">{{ gap.rivals|join(', ') }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endif %}
+
+{% if comparison.strengths %}
+<h2>Where you are ahead</h2>
+<div class="panel"><div class="inner"><table><tbody>
+  {% for gap in comparison.strengths %}
+    <tr><td style="width:170px"><b>{{ gap.label }}</b></td>
+      <td class="mono">{{ gap.detail }}</td></tr>
+  {% endfor %}
+</tbody></table></div></div>
+{% endif %}
+{% endif %}
 
 {% if score %}
 <h2>Scores by area</h2>
