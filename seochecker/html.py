@@ -408,6 +408,7 @@ class Document:
             "canonical": self.canonical,
             "robots_meta": self.robots,
             "lang": self.lang,
+            "hreflang": [[lang, url] for lang, _raw, url in self.hreflangs],
             "viewport": self.viewport,
             "charset_meta": self.charset_meta,
             "generator": self.generator,

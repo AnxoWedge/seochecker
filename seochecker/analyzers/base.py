@@ -15,6 +15,7 @@ from ..config import CrawlConfig
 from ..html import Document
 from ..models import Finding, Page, Severity
 from ..graph import LinkGraph
+from ..language import LanguageClusters
 from ..robots import RobotsTxt
 from ..sitemap import SitemapSet
 from ..thresholds import Thresholds
@@ -69,6 +70,7 @@ class SiteContext:
     technologies: list = field(default_factory=list)
     thresholds: Thresholds = field(default_factory=Thresholds)
     graph: LinkGraph = field(default_factory=LinkGraph)
+    languages: LanguageClusters = field(default_factory=LanguageClusters)
     soft_404_fingerprint: tuple = ()
     external_links: dict = field(default_factory=dict)   # url -> Page, when checked
 

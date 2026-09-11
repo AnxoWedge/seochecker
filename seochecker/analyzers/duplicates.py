@@ -3,6 +3,14 @@
 Only pages a search engine would actually index are compared. A page that is
 `noindex`, or that canonicalises to another URL, is a *declared* duplicate —
 reporting it would be reporting the solution as the problem.
+
+Language versions are the subtler case. Google's rule is exact: "Localized
+versions of a page are only considered duplicates if the main content of the page
+remains untranslated." So pages that declare each other as hreflang alternates
+share a title or an H1 quite legitimately — a brand name does not get translated —
+and reporting that would be noise. But when their *body content* is identical,
+that is Google's own definition of a duplicate, and it gets reported as exactly
+that: localized URLs serving untranslated content.
 """
 
 from __future__ import annotations
@@ -12,7 +20,7 @@ from typing import Iterator
 
 from ..models import Finding, Page
 from ..similarity import similarity
-from .base import SiteContext, sample, site_analyzer, warning
+from .base import SiteContext, notice, sample, site_analyzer, warning
 
 # Comparing every page with every other is quadratic, but measured, it costs
 # 1.3s at 300 pages and 3.5s at 500 — nothing against a crawl that takes minutes,
@@ -51,7 +59,13 @@ def _candidate_pairs(pages: list[Page]) -> set[tuple[str, str]]:
     return candidates
 
 
-def _group_by(pages: list[Page], key: str) -> dict[str, list[Page]]:
+def _group_by(pages: list[Page], key: str, clusters=None) -> dict[str, list[Page]]:
+    """Group pages by a shared value, discounting declared language alternates.
+
+    Two hreflang alternates sharing an H1 are one page in two languages, not two
+    pages competing. Collapsing each cluster to a single representative answers
+    "is this still a duplicate once language versions are accounted for?".
+    """
     groups: dict[str, list[Page]] = defaultdict(list)
     for page in pages:
         value = (page.seo or {}).get(key) or ""
@@ -59,7 +73,13 @@ def _group_by(pages: list[Page], key: str) -> dict[str, list[Page]]:
             value = value[0] if value else ""
         if value := str(value).strip():
             groups[value].append(page)
-    return {value: found for value, found in groups.items() if len(found) > 1}
+
+    out: dict[str, list[Page]] = {}
+    for value, found in groups.items():
+        remaining = clusters.collapse(found) if clusters is not None else found
+        if len(remaining) > 1:
+            out[value] = remaining
+    return out
 
 
 def _describe(groups: dict[str, list[Page]], limit: int = 3) -> str:
@@ -77,6 +97,7 @@ def duplicate_metadata(ctx: SiteContext) -> Iterator[Finding]:
     if len(pages) < 2:
         return
 
+    clusters = ctx.languages
     for key, label, fix in (
         ("title", "titles",
          "Every indexable page needs a distinct title. Identical titles make pages "
@@ -87,7 +108,7 @@ def duplicate_metadata(ctx: SiteContext) -> Iterator[Finding]:
         ("h1", "H1 headings",
          "The H1 should say what this particular page is about."),
     ):
-        if groups := _group_by(pages, key):
+        if groups := _group_by(pages, key, clusters):
             affected = sum(len(found) for found in groups.values())
             yield warning(
                 f"duplicate.{key}",
@@ -108,17 +129,39 @@ def duplicate_content(ctx: SiteContext) -> Iterator[Finding]:
     for page in pages:
         exact[page.content_hash].append(page)
 
+    clusters = ctx.languages
     duplicated = {fp: found for fp, found in exact.items() if len(found) > 1}
-    if duplicated:
+
+    # Split by whether the duplicates are declared language alternates of each
+    # other. Both are duplicates, but they are different problems with different
+    # fixes, so they should not be reported as one finding.
+    localized = {fp: found for fp, found in duplicated.items()
+                 if len(clusters.collapse(found)) == 1}
+    genuine = {fp: found for fp, found in duplicated.items() if fp not in localized}
+
+    if genuine:
         pairs = [f"{found[0].final_url} == {found[1].final_url}"
-                 for found in duplicated.values()]
+                 for found in genuine.values()]
         yield warning(
             "duplicate.content",
-            f"{sum(len(f) for f in duplicated.values())} pages have identical body content",
+            f"{sum(len(f) for f in genuine.values())} pages have identical body content",
             evidence=sample(pairs, 3),
-            affected=sum(len(f) for f in duplicated.values()),
+            affected=sum(len(f) for f in genuine.values()),
             fix="Consolidate them, or point the duplicates at one canonical URL. Identical "
                 "pages split whatever authority each of them earns.",
+        )
+
+    if localized:
+        examples = [clusters.describe(found) for found in localized.values()]
+        yield warning(
+            "duplicate.untranslated_localizations",
+            f"{sum(len(f) for f in localized.values())} localized pages serve identical, "
+            "untranslated content",
+            evidence=sample(examples, 3),
+            affected=sum(len(f) for f in localized.values()),
+            fix="Google treats localized versions as duplicates only when the main content "
+                "is left untranslated, which is the case here. Translate the body content, "
+                "or drop the language variants that add nothing.",
         )
 
     # Near-duplicates: different pages, but not different enough to rank apart.
@@ -128,11 +171,28 @@ def duplicate_content(ctx: SiteContext) -> Iterator[Finding]:
     candidates = _candidate_pairs(unique)
 
     near: list[str] = []
+    partly_translated: list[str] = []
     threshold = ctx.thresholds.near_duplicate_similarity
     for left_url, right_url in sorted(candidates):
         score = similarity(by_url[left_url].sketch, by_url[right_url].sketch)
-        if score >= threshold:
+        if score < threshold:
+            continue
+        if clusters.same_cluster(left_url, right_url):
+            # Alternates this similar are a translation that never finished.
+            partly_translated.append(f"{left_url} ~ {right_url} ({score:.0%} identical)")
+        else:
             near.append(f"{left_url} ~ {right_url} ({score:.0%} identical)")
+
+    if partly_translated:
+        yield notice(
+            "duplicate.partly_translated",
+            f"{len(partly_translated)} pair(s) of language alternates are nearly identical",
+            evidence=sample(partly_translated, 3),
+            affected=len(partly_translated) * 2,
+            fix="These declare each other as language versions but share most of their text, "
+                "which usually means the translation is incomplete. Untranslated main content "
+                "is the one case where Google does treat localized versions as duplicates.",
+        )
     if near:
         involved = {url for pair in near for url in pair.split(" ~ ")[0:1]} | {
             pair.split(" ~ ")[1].split(" (")[0] for pair in near}

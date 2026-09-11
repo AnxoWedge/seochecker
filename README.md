@@ -312,6 +312,25 @@ similarity and 16% at the 90th percentile, while its one real near-duplicate pai
 Pages that declare themselves duplicates, by `noindex` or by canonicalising
 elsewhere, are excluded. That is the fix, not the fault.
 
+### Language versions
+
+Google's rule is exact: *"Localized versions of a page are only considered
+duplicates if the main content of the page remains untranslated."* seochecker
+follows it.
+
+Pages that declare each other as `hreflang` alternates are treated as one page in
+several languages, so a shared title, description or H1 between them is not
+reported — a brand name does not get translated. What *is* reported is the case
+Google actually calls a duplicate: alternates serving identical untranslated body
+content (`duplicate.untranslated_localizations`), and alternates that are nearly
+identical, which usually means a translation that was never finished
+(`duplicate.partly_translated`).
+
+Reciprocity is required before two pages count as alternates, because Google
+ignores one-way `hreflang`: *"If two pages don't both point to each other, the
+tags will be ignored."* An alternate the crawl budget never reached is given the
+benefit of the doubt.
+
 Severities are `critical`, `warning`, `notice`, `info`. A page that is blocked or
 fails to fetch reports **only that** — a bot-mitigation challenge page is never
 described as if it were the site.
@@ -407,6 +426,7 @@ seochecker/
     templates/           its pages
   score.py               the scoring model, and the calibration behind it
   compare.py             rival comparison: metrics and gap analysis
+  language.py            hreflang clusters, so translations are not duplicates
   report/
     html_out.py          self-contained HTML report
     template.html.j2     its markup, styles and interactions
@@ -429,4 +449,5 @@ tests/test_report.py      the scoring calibration table, and the report writers
 tests/test_politeness.py  pacing, the circuit breaker, and the cache
 tests/test_web.py         the dashboard, end to end
 tests/test_compare.py     comparison metrics, gaps, and the equal-budget contract
+tests/test_language.py    language-aware duplicate detection
 ```

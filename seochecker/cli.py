@@ -24,6 +24,7 @@ from .config import CrawlConfig, config_from_args
 from .fetch import Fetcher
 from .fingerprint import Detection, Fingerprinter, group_by_category
 from .html import Document
+from . import language
 from .models import Finding, Page, Severity
 from .report import RunStore, diff_runs, write_csv, write_html
 from .report.html_out import build_context
@@ -86,6 +87,7 @@ async def run_crawl(config: CrawlConfig, on_page=None, should_stop=None) -> Craw
             technologies=result.technologies,
             thresholds=Thresholds(),
             graph=result.graph,
+            languages=language.build(result.pages),
             soft_404_fingerprint=result.soft_404_fingerprint,
             external_links=result.external_links,
         )
