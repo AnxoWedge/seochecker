@@ -322,6 +322,16 @@ def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) ->
                      if result.sitemap.fetched else "[yellow]none found[/yellow]")
     by_status = Counter(p.status for p in result.pages if p.status)
     overview.add_row("statuses", " · ".join(f"{code}: {n}" for code, n in sorted(by_status.items())))
+    rendered = result.stats.get("rendered")
+    if note := result.stats.get("render"):
+        overview.add_row("rendering", f"[yellow]{note}[/yellow]")
+    elif rendered:
+        failures = result.stats.get("render_failures") or 0
+        gained = sum(1 for p in result.pages
+                     if p.render_diff.get("words_after", 0) > p.render_diff.get("words_before", 0))
+        overview.add_row("rendering",
+                         f"{rendered} page(s) rendered · {gained} gained content from JavaScript"
+                         + (f" · [yellow]{failures} failed[/yellow]" if failures else ""))
     if skipped := result.frontier.get("skipped"):
         overview.add_row("skipped", " · ".join(f"{n} {why}" for why, n in
                                                list(skipped.items())[:5]))
@@ -336,8 +346,8 @@ def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity) ->
         edges = sum(len(targets) for targets in graph.outgoing.values())
         structure.add_row("link graph",
                           f"{len(graph.nodes)} pages · {edges} internal links · "
-                          f"deepest page {max(graph.click_depth.values(), default=0)} "
-                          f"clicks from home")
+                          f"deepest page {(deepest := max(graph.click_depth.values(), default=0))} "
+                          f"click{'s' if deepest != 1 else ''} from home")
         if orphans := graph.orphans():
             structure.add_row("orphans", f"[yellow]{len(orphans)}[/yellow] page(s) with no "
                                          f"inbound internal link")

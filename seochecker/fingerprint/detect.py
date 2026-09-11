@@ -27,7 +27,7 @@ MIN_REPORTED_CONFIDENCE = 0.5
 IMPLICATION_DECAY = 0.9
 
 SIGNAL_TYPES = frozenset({
-    "header", "cookie", "meta", "html", "script", "stylesheet", "url", "dom",
+    "header", "cookie", "meta", "html", "script", "stylesheet", "url", "dom", "js",
 })
 
 
@@ -206,7 +206,7 @@ def load_rules(path: Path | None = None) -> tuple[dict[str, Technology], dict[st
                     Signal(
                         type=kind,
                         confidence=float(raw.get("confidence", DEFAULT_CONFIDENCE)),
-                        key=raw.get("key") if kind in ("header", "meta") else None,
+                        key=raw.get("key") if kind in ("header", "meta", "js") else None,
                         key_re=_compile(raw["key"]) if kind == "cookie" else None,
                         pattern=_compile(raw["pattern"]) if raw.get("pattern") else None,
                         selector=raw.get("selector"),
@@ -285,6 +285,13 @@ class Fingerprinter:
                         return True, "", f"cookie {name}"
                 return False, "", ""
 
+            case "js":
+                # Only available when the page was rendered; absent otherwise,
+                # which means "unknown", not "no".
+                if signal.key in page.js_globals:
+                    return True, "", f"js global: {signal.key}"
+                return False, "", ""
+
             case "url":
                 found = signal.pattern.search(page.final_url) if signal.pattern else None
                 if found:
@@ -339,6 +346,15 @@ class Fingerprinter:
         return False, "", ""
 
     # --- detection ---------------------------------------------------------
+
+    def js_globals(self) -> list[str]:
+        """Every JavaScript global the rules ask about, for the renderer to probe."""
+        return sorted({
+            signal.key
+            for tech in self.technologies.values()
+            for signal in tech.signals
+            if signal.type == "js" and signal.key
+        })
 
     def detect(self, page: Page, doc: Document | None) -> list[Detection]:
         direct: dict[str, Detection] = {}

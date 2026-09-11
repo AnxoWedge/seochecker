@@ -113,6 +113,9 @@ class Page:
     click_depth: int | None = None
     inlink_count: int = 0
     rendered: bool = False
+    render_reason: str = ""
+    js_globals: list[str] = field(default_factory=list)
+    render_diff: dict[str, Any] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
 
     def __post_init__(self) -> None:

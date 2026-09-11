@@ -4,3 +4,8 @@ selectolax==0.4.11       # fast HTML parsing (Modest/Lexbor)
 brotli==1.2.0            # so we can honestly advertise `br` in Accept-Encoding
 zstandard==0.25.0        # ...and `zstd`
 rich==15.0.0             # CLI output
+
+# Optional: JavaScript rendering (--render auto/always).
+# Everything above works without it; `--render never` skips it entirely.
+#   ./venv/bin/pip install playwright==1.62.0
+#   ./venv/bin/python -m playwright install chromium

@@ -17,6 +17,7 @@ from . import (  # noqa: F401  (imported for the side effect of registering)
     images,
     links,
     meta,
+    rendering,
     site,
     social,
     structure,

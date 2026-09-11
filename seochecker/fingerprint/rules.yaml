@@ -57,6 +57,7 @@ technologies:
       - {type: header, key: link, pattern: '/wp-json/', confidence: 0.8}
       - {type: cookie, key: '^wordpress_', confidence: 0.9}
       - {type: cookie, key: '^wp-settings-', confidence: 0.9}
+      - {type: js, key: wp, confidence: 0.9}
 
   WooCommerce:
     category: ecommerce
@@ -76,6 +77,7 @@ technologies:
       - {type: meta, key: generator, pattern: '^Elementor(?:\s+([\d.]+))?', version: 1, confidence: 1.0}
       - {type: script, pattern: '/plugins/elementor', confidence: 0.9}
       - {type: html, pattern: 'elementor-(?:widget|section|element)', confidence: 0.8}
+      - {type: js, key: elementorFrontend, confidence: 1.0}
 
   Divi:
     category: page-builder
@@ -111,6 +113,7 @@ technologies:
       - {type: html, pattern: 'Shopify\.theme', confidence: 0.9}
       - {type: cookie, key: '^_shopify_', confidence: 0.9}
       - {type: script, pattern: '/cdn/shop(?:ifycloud)?/', confidence: 0.8}
+      - {type: js, key: Shopify, confidence: 1.0}
 
   Wix:
     category: cms
@@ -119,6 +122,7 @@ technologies:
       - {type: header, key: x-wix-request-id, pattern: '.', confidence: 1.0}
       - {type: meta, key: generator, pattern: 'Wix\.com Website Builder', confidence: 1.0}
       - {type: html, pattern: 'static\.parastorage\.com', confidence: 0.9}
+      - {type: js, key: wixBiSession, confidence: 1.0}
 
   Squarespace:
     category: cms
@@ -127,6 +131,7 @@ technologies:
       - {type: html, pattern: 'Static\.SQUARESPACE_CONTEXT', confidence: 1.0}
       - {type: html, pattern: 'static1\.squarespace\.com', confidence: 0.9}
       - {type: meta, key: generator, pattern: 'Squarespace', confidence: 1.0}
+      - {type: js, key: Static.SQUARESPACE_CONTEXT, confidence: 1.0}
 
   Webflow:
     category: cms
@@ -135,6 +140,7 @@ technologies:
       - {type: meta, key: generator, pattern: 'Webflow', confidence: 1.0}
       - {type: dom, selector: 'html[data-wf-page]', confidence: 0.9}
       - {type: html, pattern: '(?:assets|cdn\.prod)\.website-files\.com', confidence: 0.9}
+      - {type: js, key: Webflow, confidence: 1.0}
 
   Framer:
     category: cms
@@ -153,6 +159,7 @@ technologies:
       - {type: header, key: x-drupal-cache, pattern: '.', confidence: 0.9}
       - {type: html, pattern: 'drupal-settings-json', confidence: 0.9}
       - {type: html, pattern: '/sites/(?:default|all)/files/', confidence: 0.7}
+      - {type: js, key: Drupal, confidence: 1.0}
 
   Joomla:
     category: cms
@@ -205,6 +212,7 @@ technologies:
       - {type: html, pattern: '__NEXT_DATA__', confidence: 1.0}
       - {type: html, pattern: '/_next/static/', confidence: 0.9}
       - {type: dom, selector: '#__next', confidence: 0.8}
+      - {type: js, key: __NEXT_DATA__, confidence: 1.0}
 
   Nuxt:
     category: framework
@@ -213,6 +221,7 @@ technologies:
     signals:
       - {type: html, pattern: '__NUXT__', confidence: 1.0}
       - {type: html, pattern: '/_nuxt/', confidence: 0.9}
+      - {type: js, key: __NUXT__, confidence: 1.0}
 
   Astro:
     category: static-site
@@ -265,6 +274,7 @@ technologies:
       - {type: html, pattern: '__VUE__|__vue_app__', confidence: 0.9}
       - {type: script, pattern: 'vue(?:@|\.runtime|\.global|\.min)[^/]*([\d.]+)?', version: 1, confidence: 0.6}
       - {type: dom, selector: '[data-v-app]', confidence: 0.7}
+      - {type: js, key: __VUE__, confidence: 0.9}
 
   Angular:
     category: framework
@@ -272,6 +282,7 @@ technologies:
     signals:
       - {type: dom, selector: '[ng-version]', attribute: ng-version, pattern: '([\d.]+)', version: 1, confidence: 1.0}
       - {type: html, pattern: '_nghost-|_ngcontent-', confidence: 0.8}
+      - {type: js, key: ng, confidence: 0.8}
 
   # --------------------------------------------------------- platform -------
   PHP:
@@ -367,6 +378,7 @@ technologies:
     signals:
       - {type: html, pattern: 'googletagmanager\.com/gtm\.js', confidence: 1.0}
       - {type: html, pattern: 'GTM-[A-Z0-9]{4,}', confidence: 0.9}
+      - {type: js, key: google_tag_manager, confidence: 1.0}
 
   Google Analytics (Universal):
     category: analytics
@@ -379,11 +391,13 @@ technologies:
     signals:
       - {type: html, pattern: 'fbq\([''"]init[''"]', confidence: 1.0}
       - {type: script, pattern: 'connect\.facebook\.net/[^/]+/fbevents\.js', confidence: 1.0}
+      - {type: js, key: fbq, confidence: 1.0}
 
   Hotjar:
     category: analytics
     signals:
       - {type: html, pattern: 'static\.hotjar\.com|hjSettings', confidence: 1.0}
+      - {type: js, key: hj, confidence: 0.9}
 
   Microsoft Clarity:
     category: analytics
@@ -433,11 +447,13 @@ technologies:
     category: chat
     signals:
       - {type: html, pattern: 'widget\.intercom\.io|intercomSettings', confidence: 1.0}
+      - {type: js, key: Intercom, confidence: 1.0}
 
   Crisp:
     category: chat
     signals:
       - {type: script, pattern: 'client\.crisp\.chat', confidence: 1.0}
+      - {type: js, key: $crisp, confidence: 1.0}
 
   Tawk.to:
     category: chat
@@ -454,6 +470,7 @@ technologies:
     category: payment
     signals:
       - {type: script, pattern: 'js\.stripe\.com', confidence: 1.0}
+      - {type: js, key: Stripe, confidence: 1.0}
 
   PayPal:
     category: payment
@@ -465,6 +482,7 @@ technologies:
     category: security
     signals:
       - {type: script, pattern: 'google\.com/recaptcha|gstatic\.com/recaptcha', confidence: 1.0}
+      - {type: js, key: grecaptcha, confidence: 1.0}
 
   Cloudflare Turnstile:
     category: security
@@ -476,6 +494,7 @@ technologies:
     category: javascript
     signals:
       - {type: script, pattern: 'jquery[.\-/@]?(\d+\.\d+(?:\.\d+)?)?[^/]*\.js', version: 1, confidence: 0.9}
+      - {type: js, key: jQuery, confidence: 1.0}
 
   Bootstrap:
     category: ui

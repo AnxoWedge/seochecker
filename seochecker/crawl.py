@@ -23,6 +23,7 @@ from .fingerprint import Detection, Fingerprinter
 from .graph import LinkGraph
 from .html import Document
 from .models import Finding, Page
+from .render import Renderer, playwright_available, should_render
 from .robots import RobotsTxt, parse as parse_robots, product_token
 from .similarity import content_hash, sketch
 from .sitemap import SitemapSet, load_sitemaps
@@ -84,6 +85,9 @@ class Crawler:
         self.result = CrawlResult()
         self.on_page = on_page
         self._sitemap_urls: set[str] = set()
+        self._renderer: Renderer | None = None
+        self._renders_used = 0
+        self._probe_globals = self.fingerprinter.js_globals()
         self._fingerprinted = 0
         self._merged: dict[str, Detection] = {}
         self._started = 0.0
@@ -143,6 +147,36 @@ class Crawler:
             return True
         return self.result.robots.is_allowed(url, self.agent)
 
+    def _wants_render(self, doc) -> str:
+        if self.config.render == "never" or self._renderer is None:
+            return ""
+        if self._renders_used >= self.config.max_render:
+            return ""
+        if self.config.render == "always":
+            return "--render always"
+        return should_render(doc)
+
+    async def _render_page(self, page: Page, doc, reason: str):
+        """Render, record what changed, and return the rendered document."""
+        self._renders_used += 1          # reserve the slot before awaiting
+        result = await self._renderer.render(page.final_url, self._probe_globals)
+        if not result.ok:
+            page.render_diff = {"error": result.error}
+            return doc
+
+        rendered = Document(result.html, page.final_url)
+        page.rendered = True
+        page.render_reason = reason
+        page.js_globals = result.globals
+        page.render_diff = {
+            "words_before": doc.word_count, "words_after": rendered.word_count,
+            "links_before": len(doc.links), "links_after": len(rendered.links),
+            "title_before": doc.title, "title_after": rendered.title,
+            "description_before": doc.description, "description_after": rendered.description,
+            "elapsed_ms": result.elapsed_ms,
+        }
+        return rendered
+
     async def _process(self, task: Task, fetcher: Fetcher,
                        queue: asyncio.Queue) -> None:
         page = await fetcher.fetch(task.url, depth=task.depth, referrer=task.referrer or None)
@@ -153,6 +187,9 @@ class Crawler:
             if page.error is None and page.is_html and page.html
             else None
         )
+
+        if doc is not None and (reason := self._wants_render(doc)):
+            doc = await self._render_page(page, doc, reason)
 
         technologies: list[Detection] = []
         if doc is not None and self._fingerprinted < FINGERPRINT_SAMPLE:
@@ -247,6 +284,13 @@ class Crawler:
         self._started = time.perf_counter()
         config = self.config
 
+        if config.render != "never":
+            if playwright_available():
+                self._renderer = Renderer(timeout=config.timeout,
+                                          user_agent=config.user_agent)
+            else:
+                self.result.stats["render"] = "skipped: playwright not installed"
+
         async with Fetcher(config) as fetcher:
             if config.obey_robots:
                 self.result.robots = await self._load_robots(fetcher)
@@ -315,6 +359,11 @@ class Crawler:
 
         if self.frontier.full and not self.result.stopped_because:
             self.result.stopped_because = f"page limit ({config.max_pages}) reached"
+
+        if self._renderer is not None:
+            self.result.stats["rendered"] = self._renderer.rendered
+            self.result.stats["render_failures"] = self._renderer.failures
+            await self._renderer.close()
 
         self.result.graph = LinkGraph.build(self.result.pages, config.url)
         self.result.graph.apply_to(self.result.pages)

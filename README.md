@@ -46,6 +46,8 @@ pipe the report while still watching the run:
 | `--ignore-robots` | Ignore robots.txt — only for sites you own |
 | `--check-external` | Also verify external links resolve (requests to third-party servers) |
 | `--no-soft-404-probe` | Skip the single request that tests how the site handles a missing URL |
+| `--render never\|auto\|always` | Headless rendering policy (default `auto`) |
+| `--max-render 50` | Cap on pages rendered (default 25) |
 | `--delay 1.0` | Minimum seconds between requests to one host |
 | `--timeout 30` | Per-request timeout |
 | `--retries 3` | Retries on timeouts, connection errors and 429/5xx |
@@ -61,6 +63,38 @@ pipe the report while still watching the run:
 
 Exit code is `0` on success, `1` when the fetch failed or `--fail-on` is triggered —
 so it can gate CI.
+
+## JavaScript rendering
+
+Optional, and off unless needed:
+
+```bash
+./venv/bin/pip install -r requirements-render.txt
+./venv/bin/python -m playwright install chromium
+```
+
+Without it, everything else still works — `--render` just reports that Playwright
+is missing.
+
+`--render auto` (the default) renders only pages whose served HTML looks
+incomplete: no readable text at all, or fewer than 100 words combined with an
+empty app-shell container (`#root`, `#app`, `#__next`…) or five or more scripts.
+Verified against wordpress.org, mozilla.org and example.com, it renders **zero**
+pages — a normal server-rendered site never pays for a browser launch.
+
+When a page is rendered, the crawler:
+
+- analyses the **rendered** DOM, so the audit reflects what a rendering crawler sees
+- follows links that only exist after JavaScript — an SPA that is a dead end
+  without rendering becomes a crawlable site with it
+- records the difference, and reports content, links, titles or descriptions that
+  exist *only* after rendering. Google renders JavaScript, but on a delay and a
+  budget; Bing, social preview bots and most AI crawlers largely do not.
+- probes for the JavaScript globals the fingerprint rules ask about (`Shopify`,
+  `wp`, `__NEXT_DATA__`, …), which catches platforms that leave no trace in the
+  served HTML
+
+Rendering costs roughly 1-10 seconds per page, hence `--max-render`.
 
 ## How it crawls
 
@@ -233,6 +267,7 @@ seochecker/
   sitemap.py             sitemap, sitemapindex, gzip and plain-text forms
   graph.py               internal link graph: PageRank, click depth, orphans
   similarity.py          MinHash sketches for near-duplicate detection
+  render.py              headless rendering and the decision of when to use it
   fingerprint/
     rules.yaml           68 technologies, 136 signals — data, not code
     detect.py            rules engine, confidence scoring, implications
@@ -246,4 +281,5 @@ tests/test_analyzers.py   on-page checks, including false-positive guards
 tests/test_fingerprint.py rules engine, confidence, implications
 tests/test_crawl.py       scope, dedup, robots, sitemap, limits
 tests/test_sitewide.py    duplicates, link graph, soft 404s, external links
+tests/test_render.py      the render heuristic, and rendering end to end
 ```

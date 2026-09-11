@@ -50,6 +50,10 @@ class CrawlConfig:
     use_sitemap: bool = True
     probe_soft_404: bool = True
     check_external: bool = False
+
+    # --- rendering ----------------------------------------------------------
+    render: str = "auto"        # never | auto | always
+    max_render: int = 25        # rendering costs 1-10s a page, so it is capped
     max_time: float = 0.0   # seconds; 0 = no limit
 
     # --- politeness ---------------------------------------------------------
@@ -173,6 +177,13 @@ def build_parser() -> argparse.ArgumentParser:
                      help="do not verify TLS certificates")
     net.add_argument("--proxy", default=None, metavar="URL")
 
+    js = p.add_argument_group("javascript rendering")
+    js.add_argument("--render", choices=["never", "auto", "always"], default="auto",
+                    help="render pages in a headless browser: 'auto' only where the "
+                         "served HTML looks incomplete")
+    js.add_argument("--max-render", type=int, default=25, metavar="N",
+                    help="cap on pages rendered, since each costs 1-10 seconds")
+
     fp = p.add_argument_group("fingerprinting")
     fp.add_argument("--rules", default=None, metavar="PATH",
                     help="custom technology rules file (defaults to the bundled rules.yaml)")
@@ -212,6 +223,8 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         use_sitemap=args.use_sitemap,
         probe_soft_404=args.probe_soft_404,
         check_external=args.check_external,
+        render=args.render,
+        max_render=args.max_render,
         max_time=args.max_time,
         concurrency=args.concurrency,
         delay=args.delay,
