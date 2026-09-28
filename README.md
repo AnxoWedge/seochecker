@@ -319,7 +319,7 @@ a fix.
 | `indexability` | `noindex` / `nofollow` from meta robots *and* `X-Robots-Tag`, restricted snippets |
 | `canonical` | missing, conflicting, relative, cross-domain, insecure, not self-referential |
 | `headings` | no headings, no `h1`, multiple `h1`, empty, skipped levels |
-| `images` | **missing alt**, alt too long, alt that is just a filename or slug, missing dimensions (CLS), no lazy loading, missing `src` |
+| `images` | **missing alt**, named by aria rather than alt, redundant "photo of" prefixes, generic alt, the same alt repeated, alt that is just a filename or slug, alt too long, generic filenames, image buttons / image-map areas / icon-only links with no accessible name, tracking pixels without `alt=""`, missing dimensions (CLS), no lazy loading, missing `src` |
 | `links` | no links, no internal links, empty anchors, generic anchor text (EN + PT), too many links, internal `nofollow`, `http://` links on an HTTPS page, unsafe `target="_blank"` |
 | `social` | Open Graph missing or incomplete, relative `og:image`, `og:url` mismatch, Twitter card |
 | `structured` | invalid JSON-LD, none present, microdata-only, missing required properties for 13 schema types |
@@ -362,6 +362,30 @@ similarity and 16% at the 90th percentile, while its one real near-duplicate pai
 
 Pages that declare themselves duplicates, by `noindex` or by canonicalising
 elsewhere, are excluded. That is the fix, not the fault.
+
+### Alt text
+
+Alt is checked on more than `<img>`. The HTML spec also requires it on
+`<input type="image">` and `<area>`, ARIA requires a name on `role="img"`, and an
+inline `<svg>` that is the whole content of a link or button leaves that control
+with nothing at all to announce.
+
+Quality is checked too, following Google: *"Don't include extra words like 'Image
+of' or 'Photo of'"*, and *"avoid using generic filenames like image1.jpg, pic.gif
+or 1.jpg"*. Alt that says only "image" or "logo", and one alt string repeated
+across many images, are both reported.
+
+Two distinctions that keep it from crying wolf, both added after live sites
+exposed them:
+
+- An image named by `aria-label` is **not** missing its accessible name. It is
+  reported as the lesser problem it is: assistive technology reads it, Google
+  does not.
+- A control that names *itself* is fine. `<button aria-label="Open menu"><svg>`
+  is correct, and was briefly reported as a fault on wordpress.org.
+- Image proxies are followed to the file they serve. `/_next/image?url=…` is the
+  framework's path, not the author's filename, and judging it as generic flagged
+  every image on every Next.js site.
 
 ### Language versions
 

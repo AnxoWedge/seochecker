@@ -76,6 +76,10 @@ class Image:
     height: str = ""
     loading: str = ""
     srcset: str = ""
+    aria_label: str = ""
+    aria_labelledby: str = ""
+    role: str = ""
+    aria_hidden: bool = False
 
     @property
     def has_alt(self) -> bool:
@@ -83,7 +87,59 @@ class Image:
 
     @property
     def decorative(self) -> bool:
-        return self.alt == ""
+        """Explicitly marked as carrying no information."""
+        return (self.alt == "" or self.aria_hidden
+                or self.role in ("presentation", "none"))
+
+    @property
+    def accessible_name(self) -> str:
+        """What a screen reader would announce, in roughly the order it looks."""
+        return (self.alt or self.aria_label or self.aria_labelledby
+                or self.title or "")
+
+    @property
+    def named_without_alt(self) -> bool:
+        """Has a name, but not through the attribute that search engines read."""
+        return not self.has_alt and bool(
+            self.aria_label or self.aria_labelledby or self.title)
+
+    @property
+    def tracking_pixel(self) -> bool:
+        """A 1x1 image is a beacon, not content. It wants alt="", not a description."""
+        return self.width.strip() in ("1", "0") and self.height.strip() in ("1", "0")
+
+
+@dataclass(slots=True)
+class AltTarget:
+    """Anything other than `<img>` that still owes the reader an alternative.
+
+    The HTML spec requires `alt` on `<input type="image">` and `<area>`; ARIA
+    requires an accessible name on `role="img"`. An inline `<svg>` that is the
+    entire content of a link or button leaves that control with nothing to
+    announce.
+    """
+
+    kind: str
+    identifier: str
+    alt: str | None = None
+    aria_label: str = ""
+    aria_labelledby: str = ""
+    title: str = ""
+    role: str = ""
+    aria_hidden: bool = False
+
+    @property
+    def decorative(self) -> bool:
+        return self.aria_hidden or self.role in ("presentation", "none")
+
+    @property
+    def accessible_name(self) -> str:
+        return (self.alt or self.aria_label or self.aria_labelledby
+                or self.title or "")
+
+    @property
+    def unnamed(self) -> bool:
+        return not self.decorative and not self.accessible_name.strip()
 
 
 class Document:
@@ -356,8 +412,73 @@ class Document:
                     height=(attrs.get("height") or "").strip(),
                     loading=(attrs.get("loading") or "").strip().lower(),
                     srcset=(attrs.get("srcset") or "").strip(),
+                    aria_label=(attrs.get("aria-label") or "").strip(),
+                    aria_labelledby=(attrs.get("aria-labelledby") or "").strip(),
+                    role=(attrs.get("role") or "").strip().lower(),
+                    aria_hidden=(attrs.get("aria-hidden") or "").strip().lower() == "true",
                 )
             )
+        return out
+
+    @cached_property
+    def alt_targets(self) -> list[AltTarget]:
+        """Non-`<img>` elements that still need an alternative.
+
+        Inline `<svg>` is only included when it is the whole content of a link or
+        button. A decorative icon sitting beside a text label is fine and
+        flagging every one of them would bury the cases that matter.
+        """
+        out: list[AltTarget] = []
+
+        def common(node, kind: str, identifier: str) -> AltTarget:
+            attrs = node.attributes
+            return AltTarget(
+                kind=kind,
+                identifier=identifier,
+                alt=attrs.get("alt"),
+                aria_label=(attrs.get("aria-label") or "").strip(),
+                aria_labelledby=(attrs.get("aria-labelledby") or "").strip(),
+                title=(attrs.get("title") or "").strip(),
+                role=(attrs.get("role") or "").strip().lower(),
+                aria_hidden=(attrs.get("aria-hidden") or "").strip().lower() == "true",
+            )
+
+        for node in self.tree.css('input[type="image"]'):
+            src = (node.attributes.get("src") or "").strip()
+            out.append(common(node, "input image", src or "(no src)"))
+
+        for node in self.tree.css("area"):
+            href = (node.attributes.get("href") or "").strip()
+            out.append(common(node, "image map area", href or "(no href)"))
+
+        for node in self.tree.css("svg"):
+            parent = node.parent
+            if parent is None or parent.tag not in ("a", "button"):
+                continue
+            # Only a problem when the control has nothing at all to announce.
+            # The name can come from the control's own text, or from its own
+            # aria-label — `<button aria-label="Open menu"><svg></button>` is
+            # perfectly accessible and was briefly reported as a fault.
+            if _WS.sub(" ", parent.text() or "").strip():
+                continue
+            parent_attrs = parent.attributes
+            target = common(node, "svg in a link or button",
+                            (parent_attrs.get("href") or "").strip() or "(button)")
+            target.aria_label = (target.aria_label
+                                 or (parent_attrs.get("aria-label") or "").strip())
+            target.aria_labelledby = (target.aria_labelledby
+                                      or (parent_attrs.get("aria-labelledby") or "").strip())
+            target.title = target.title or (parent_attrs.get("title") or "").strip()
+            if (svg_title := node.css_first("title")) is not None:
+                target.alt = _WS.sub(" ", svg_title.text() or "").strip()
+            out.append(target)
+
+        for node in self.tree.css('[role="img"]'):
+            if node.tag in ("img", "svg"):
+                continue
+            out.append(common(node, 'role="img" element',
+                              (node.attributes.get("class") or node.tag)))
+
         return out
 
     @cached_property
