@@ -372,19 +372,23 @@ technologies:
     signals:
       - {type: html, pattern: 'gtag\([''"]config[''"],\s*[''"]G-', confidence: 1.0}
       - {type: script, pattern: 'googletagmanager\.com/gtag/js', confidence: 0.9}
+      - {type: bundle, pattern: 'G-[A-Z0-9]{8,}', case_sensitive: true, confidence: 0.9}
+      - {type: bundle, pattern: 'googletagmanager\\.com/gtag/js', confidence: 1.0}
 
   Google Tag Manager:
     category: tag-manager
     signals:
       - {type: html, pattern: 'googletagmanager\.com/gtm\.js', confidence: 1.0}
-      - {type: html, pattern: 'GTM-[A-Z0-9]{4,}', confidence: 0.9}
+      - {type: html, pattern: 'GTM-[A-Z0-9]{4,}', case_sensitive: true, confidence: 0.9}
       - {type: js, key: google_tag_manager, confidence: 1.0}
+      - {type: bundle, pattern: 'googletagmanager\\.com/gtm\\.js', confidence: 1.0}
+      - {type: bundle, pattern: 'GTM-[A-Z0-9]{4,}', case_sensitive: true, confidence: 0.9}
 
   Google Analytics (Universal):
     category: analytics
     signals:
       - {type: script, pattern: 'google-analytics\.com/(?:analytics|ga)\.js', confidence: 1.0}
-      - {type: html, pattern: '[''"]UA-\d{4,}-\d+[''"]', confidence: 0.9}
+      - {type: html, pattern: '[''"]UA-\d{4,}-\d+[''"]', case_sensitive: true, confidence: 0.9}
 
   Meta Pixel:
     category: advertising
@@ -392,22 +396,26 @@ technologies:
       - {type: html, pattern: 'fbq\([''"]init[''"]', confidence: 1.0}
       - {type: script, pattern: 'connect\.facebook\.net/[^/]+/fbevents\.js', confidence: 1.0}
       - {type: js, key: fbq, confidence: 1.0}
+      - {type: bundle, pattern: 'connect\\.facebook\\.net/[^/"'']+/fbevents\\.js', confidence: 1.0}
 
   Hotjar:
     category: analytics
     signals:
       - {type: html, pattern: 'static\.hotjar\.com|hjSettings', confidence: 1.0}
       - {type: js, key: hj, confidence: 0.9}
+      - {type: bundle, pattern: 'static\\.hotjar\\.com', confidence: 1.0}
 
   Microsoft Clarity:
     category: analytics
     signals:
       - {type: html, pattern: 'clarity\.ms/tag', confidence: 1.0}
+      - {type: bundle, pattern: 'clarity\\.ms/tag', confidence: 1.0}
 
   Plausible:
     category: analytics
     signals:
       - {type: script, pattern: 'plausible\.io/js/', confidence: 1.0}
+      - {type: bundle, pattern: 'plausible\\.io/js/', confidence: 1.0}
 
   Matomo:
     category: analytics
@@ -441,6 +449,7 @@ technologies:
     signals:
       # The IAB Transparency and Consent Framework API. Unambiguous.
       - {type: html, pattern: '__tcfapi', confidence: 1.0}
+      - {type: bundle, pattern: '__tcfapi', confidence: 1.0}
       # Structural markers only — an element named for consent, not prose that
       # happens to mention cookies.
       - {type: html, pattern: '(?:class|id)="[^"]*cookie[-_]?(?:consent|banner|notice|bar|popup|modal)', confidence: 0.9}

@@ -28,6 +28,7 @@ IMPLICATION_DECAY = 0.9
 
 SIGNAL_TYPES = frozenset({
     "header", "cookie", "meta", "html", "script", "stylesheet", "url", "dom", "js",
+    "bundle",
 })
 
 
@@ -180,8 +181,14 @@ class Detection:
         }
 
 
-def _compile(pattern: str) -> re.Pattern[str]:
-    return re.compile(pattern, re.I)
+def _compile(pattern: str, case_sensitive: bool = False) -> re.Pattern[str]:
+    """Patterns are case-insensitive unless a rule says otherwise.
+
+    Identifiers are the exception. A GA4 measurement id is uppercase by
+    definition, and matching it loosely turns any `g-searchParams` in a bundle
+    into a false detection.
+    """
+    return re.compile(pattern, 0 if case_sensitive else re.I)
 
 
 def load_rules(path: Path | None = None) -> tuple[dict[str, Technology], dict[str, str]]:
@@ -208,7 +215,8 @@ def load_rules(path: Path | None = None) -> tuple[dict[str, Technology], dict[st
                         confidence=float(raw.get("confidence", DEFAULT_CONFIDENCE)),
                         key=raw.get("key") if kind in ("header", "meta", "js") else None,
                         key_re=_compile(raw["key"]) if kind == "cookie" else None,
-                        pattern=_compile(raw["pattern"]) if raw.get("pattern") else None,
+                        pattern=(_compile(raw["pattern"], bool(raw.get("case_sensitive")))
+                                 if raw.get("pattern") else None),
                         selector=raw.get("selector"),
                         attribute=raw.get("attribute"),
                         version_group=raw.get("version"),
@@ -308,6 +316,18 @@ class Fingerprinter:
                     if found:
                         return True, signal.version_from(found), \
                                f"meta {signal.key}: {content[:80]}"
+                return False, "", ""
+
+            case "bundle":
+                # The page's own JavaScript. On a framework build the analytics
+                # loader, the measurement id and the consent wiring live in a
+                # chunk and appear nowhere in the HTML.
+                if not page.bundles:
+                    return False, "", ""
+                found = signal.pattern.search(page.bundles)
+                if found:
+                    return True, signal.version_from(found), \
+                           f"javascript bundle: {found.group(0)[:60]}"
                 return False, "", ""
 
             case "html":

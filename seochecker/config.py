@@ -85,6 +85,7 @@ class CrawlConfig:
     # --- fingerprinting -----------------------------------------------------
     rules: str | None = None          # custom rules.yaml
     min_confidence: float = 0.5
+    scan_bundles: bool = True   # read the page's own JS, where frameworks hide things
 
     # --- output -------------------------------------------------------------
     out: str | None = None
@@ -236,6 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="custom technology rules file (defaults to the bundled rules.yaml)")
     fp.add_argument("--min-confidence", type=float, default=0.5, metavar="0..1",
                     help="hide technology detections below this confidence")
+    fp.add_argument("--no-bundle-scan", dest="scan_bundles", action="store_false",
+                    help="do not read the page's own JavaScript. A framework build puts "
+                         "analytics and consent wiring in a chunk, not the HTML, so this "
+                         "is how they are found at all")
 
     out = p.add_argument_group("output")
     out.add_argument("-o", "--out", default=None, metavar="PATH",
@@ -305,6 +310,7 @@ def config_from_args(argv: list[str] | None = None) -> CrawlConfig:
         proxy=args.proxy,
         rules=args.rules,
         min_confidence=args.min_confidence,
+        scan_bundles=args.scan_bundles,
         out=args.out,
         include_html=args.include_html,
         include_links=args.include_links,

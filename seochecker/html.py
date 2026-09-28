@@ -21,6 +21,8 @@ except ImportError:  # pragma: no cover
 
 NON_NAVIGATIONAL = ("javascript:", "mailto:", "tel:", "data:", "sms:", "callto:")
 _WORD = re.compile(r"\w", re.UNICODE)
+_SCRIPT_BLOCK = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.S | re.I)
+_STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.S | re.I)
 _WS = re.compile(r"\s+")
 
 
@@ -494,6 +496,23 @@ class Document:
             except json.JSONDecodeError as exc:
                 blocks.append({"__parse_error__": str(exc)})
         return blocks
+
+    @cached_property
+    def markup_bytes(self) -> int:
+        """Size of the actual markup, with embedded script and style data removed.
+
+        A framework build ships its hydration payload inside `<script>` tags — on
+        one Next.js page, 108 KB of a 198 KB document. Counting that as markup
+        makes every such page look like it is drowning in code.
+        """
+        without = _SCRIPT_BLOCK.sub("", self.raw)
+        without = _STYLE_BLOCK.sub("", without)
+        return len(without.encode("utf-8", "ignore"))
+
+    @cached_property
+    def embedded_bytes(self) -> int:
+        """How much of the document is embedded script and style data."""
+        return max(0, len(self.raw.encode("utf-8", "ignore")) - self.markup_bytes)
 
     @cached_property
     def lower_raw(self) -> str:

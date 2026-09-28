@@ -37,6 +37,12 @@ from .urls import Scope, normalize
 # pages is fingerprinted. Without this, regex over raw HTML dominates a crawl.
 FINGERPRINT_SAMPLE = 5
 
+# Reading the page's own JavaScript is what finds a framework build's analytics.
+# Bounded by bytes rather than by a file count: a count is arbitrary, and an
+# arbitrary cap produced an arbitrary miss — the chunk holding a site's GA4 id
+# happened to be the ninth of seventeen.
+MAX_BUNDLE_BYTES = 3_000_000
+
 # Share of the page budget seeded from the sitemap before link discovery starts.
 # Seeding the whole sitemap up front starves link discovery: on a small
 # --max-pages the crawler would only ever see sitemap URLs and would never learn
@@ -61,6 +67,7 @@ class CrawlResult:
     graph: LinkGraph = field(default_factory=LinkGraph)
     soft_404_fingerprint: tuple = ()
     vitals_measured: int = 0
+    bundle_bytes: int = 0
     external_data: list = field(default_factory=list)
     external_links: dict = field(default_factory=dict)
     frontier: dict[str, Any] = field(default_factory=dict)
@@ -100,6 +107,7 @@ class Crawler:
         self._renderer: Renderer | None = None
         self._renders_used = 0
         self._probe_globals = self.fingerprinter.js_globals()
+        self._bundle_cache: dict[str, str] = {}
         self._fingerprinted = 0
         self._merged: dict[str, Detection] = {}
         self._started = 0.0
@@ -236,6 +244,8 @@ class Crawler:
         technologies: list[Detection] = []
         if doc is not None and self._fingerprinted < FINGERPRINT_SAMPLE:
             self._fingerprinted += 1
+            if self.config.scan_bundles:
+                page.bundles = await self._read_bundles(page, doc, fetcher)
             technologies = self.fingerprinter.detect(page, doc)
             for detection in technologies:
                 current = self._merged.get(detection.name)
@@ -278,6 +288,39 @@ class Crawler:
                 queue.put_nowait(nxt)
 
     # --- run ---------------------------------------------------------------
+
+    async def _read_bundles(self, page: Page, doc, fetcher: Fetcher) -> str:
+        """Fetch the page's own JavaScript, so its contents can be fingerprinted.
+
+        Same-origin only: third-party scripts belong to somebody else, and
+        downloading them would be both impolite and a source of signals about
+        their author rather than this site.
+        """
+        host = urlsplit(page.final_url).netloc
+        collected: list[str] = []
+        size = 0
+
+        for script in doc.scripts:
+            if not script.url or urlsplit(script.url).netloc != host:
+                continue
+            if size >= MAX_BUNDLE_BYTES:
+                break
+
+            # A framework serves the same chunks on every page, so each one is
+            # fetched once for the whole crawl rather than once per page.
+            body = self._bundle_cache.get(script.url)
+            if body is None:
+                fetched = await fetcher.fetch(script.url, force_read=True)
+                body = "" if fetched.error is not None else (fetched.html or "")
+                self._bundle_cache[script.url] = body
+                self.result.bundle_bytes += len(body)
+            if not body:
+                continue
+
+            collected.append(body[: MAX_BUNDLE_BYTES - size])
+            size += len(body)
+
+        return "\n".join(collected)
 
     async def _measure_vitals(self) -> None:
         """Measure the pages that matter most, chosen by internal PageRank.
@@ -438,6 +481,8 @@ class Crawler:
             self.result.stats = {
                 "requests": fetcher.requests_made,
                 **({"cache": cache.stats()} if cache else {}),
+                **({"javascript_scanned_bytes": self.result.bundle_bytes}
+                   if self.result.bundle_bytes else {}),
                 "bytes_downloaded": fetcher.bytes_downloaded,
                 "duration_ms": round((time.perf_counter() - self._started) * 1000, 1),
                 **self.result.stats,

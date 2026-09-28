@@ -42,16 +42,29 @@ def content_volume(ctx: PageContext) -> Iterator[Finding]:
                 "though short pages are fine when they answer a narrow question.",
         )
 
-    html_bytes = len(ctx.doc.raw.encode("utf-8", "ignore"))
-    if html_bytes:
-        ratio = len(ctx.doc.text) / html_bytes
+    # Text-to-HTML ratio, measured against the markup rather than the whole
+    # document, and only reported when the page is *also* short of words.
+    #
+    # On its own the ratio says almost nothing now. It was a heuristic from the
+    # table-layout era; a component framework produces deeply nested markup with
+    # utility classes and ships a hydration payload inside <script>, so a low
+    # ratio identifies a modern build rather than a thin page. It is worth
+    # mentioning only when the word count already says the page is thin, where it
+    # explains *why*.
+    markup = ctx.doc.markup_bytes
+    if markup and words < limits.thin_content:
+        ratio = len(ctx.doc.text) / markup
         if ratio < limits.text_ratio_min:
+            embedded = ctx.doc.embedded_bytes
             yield notice(
                 "content.low_text_ratio",
-                f"Text is only {ratio:.1%} of the HTML",
-                evidence=f"{len(ctx.doc.text):,} characters of text in {html_bytes:,} bytes of markup",
-                fix="Mostly a symptom: heavy inline scripts, styles or generated markup. Worth "
-                    "checking the page is not shipping far more code than content.",
+                f"Only {words} words, and text is {ratio:.1%} of the markup",
+                evidence=(f"{len(ctx.doc.text):,} characters of text in {markup:,} bytes of "
+                          f"markup" + (f", plus {embedded:,} bytes of embedded script and "
+                                       "style data" if embedded else "")),
+                fix="The page is short on words and most of what is served is markup rather "
+                    "than content. Embedded script data is excluded from this measure, so "
+                    "this is about the page itself, not the framework.",
             )
 
 

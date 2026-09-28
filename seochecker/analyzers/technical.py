@@ -200,11 +200,18 @@ def delivery(ctx: PageContext) -> Iterator[Finding]:
         )
 
     if page.decoded_bytes > limits.html_bytes_warn:
+        # Separate the markup from the payload a framework embeds in it: they are
+        # different problems with different fixes.
+        detail = ""
+        if ctx.doc is not None and ctx.doc.embedded_bytes:
+            detail = (f" — {ctx.doc.markup_bytes / 1024:.0f} KB of markup plus "
+                      f"{ctx.doc.embedded_bytes / 1024:.0f} KB of embedded script and style data")
         yield notice(
             "technical.large_html",
-            f"HTML document is {page.decoded_bytes / 1024:.0f} KB",
-            fix="Large HTML delays first paint. Usually inline styles, inline data blobs or "
-                "generated markup that could be trimmed.",
+            f"HTML document is {page.decoded_bytes / 1024:.0f} KB{detail}",
+            fix="Large HTML delays first paint. If most of it is an embedded hydration "
+                "payload, that is the framework's doing and the fix is to send less state; "
+                "if most of it is markup, the fix is to simplify the markup.",
         )
 
     if page.http_version and page.http_version.upper() in ("HTTP/1.0", "HTTP/1.1"):

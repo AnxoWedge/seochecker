@@ -421,6 +421,20 @@ Named crawlers are checked by token, so `Applebot`, `Qwantbot`, `Bingbot`,
 `DuckDuckBot` and the rest are each verified against robots.txt rather than assumed
 to behave like Googlebot.
 
+### Framework-aware measurement
+
+A component framework produces deeply nested markup and ships a hydration payload
+inside `<script>` tags — on one Next.js page, 108 KB of a 198 KB document. Two
+checks account for that:
+
+- **Text-to-HTML ratio** is measured against the markup, with embedded script and
+  style data excluded, and is only reported when the page is *also* short of
+  words. On its own the ratio is a heuristic from the table-layout era: a low
+  figure identifies a modern build, not a thin page. Word count measures thinness
+  directly, so the ratio now only explains *why* a thin page is thin.
+- **Large HTML** reports the split — how much is markup and how much is embedded
+  payload — because they are different problems with different fixes.
+
 ### Consent banners
 
 This crawler never accepts cookies, and neither does a search engine crawler. On a
@@ -449,9 +463,21 @@ not code.
   CookieYes, Complianz, Intercom, Crisp, Tawk.to, Zendesk, Stripe, PayPal,
   reCAPTCHA, Turnstile, jQuery, Bootstrap, Tailwind, Font Awesome, Google Fonts
 
-Eight signal types — response headers, cookie names, meta tags, HTML patterns,
-script and stylesheet URLs, the request URL, and CSS selectors (including version
-attributes like Angular's `ng-version`).
+Ten signal types — response headers, cookie names, meta tags, HTML patterns,
+script and stylesheet URLs, the request URL, CSS selectors (including version
+attributes like Angular's `ng-version`), JavaScript globals after rendering, and
+**the contents of the page's own JavaScript bundles**.
+
+That last one matters on any framework build. On a Next.js site the analytics
+loader, the measurement id and the consent wiring live in
+`/_next/static/chunks/*.js` and appear nowhere in the HTML — a live site was
+reported as having no analytics while running three GA4 properties. Bundles are
+same-origin only, capped at 3 MB per page, and fetched once for the whole crawl
+rather than once per page. `--no-bundle-scan` turns it off.
+
+Identifier patterns are matched case-sensitively. A GA4 measurement id is
+uppercase by definition, and matching `G-[A-Z0-9]{8,}` loosely turns every
+`g-searchParams` in a minified bundle into a false detection.
 
 **Confidence is earned, not asserted.** Independent signals combine with a
 noisy-or, so two mediocre signals that agree (0.7 + 0.7 = 0.91) beat one good one.

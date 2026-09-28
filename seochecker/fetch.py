@@ -36,10 +36,17 @@ from .models import ErrorKind, Page, RedirectHop, Timing
 RETRY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 # Bodies we actually parse. Anything else we size up and drop on the floor.
+#
+# JavaScript and CSS are here because a framework build puts almost everything in
+# a bundle: on a Next.js site the analytics loader, the measurement id and the
+# consent wiring are all in /_next/static/chunks/*.js and nowhere in the HTML.
+# Without these, `force_read` fetched such a file and then threw the bytes away.
 TEXTUAL_MIMES = frozenset({
     "text/html", "application/xhtml+xml", "text/plain", "text/xml",
     "application/xml", "application/json", "application/ld+json",
     "application/rss+xml", "application/atom+xml",
+    "text/javascript", "application/javascript", "application/x-javascript",
+    "text/css", "application/manifest+json",
 })
 
 _META_CHARSET = re.compile(
