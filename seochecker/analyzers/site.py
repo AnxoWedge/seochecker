@@ -286,3 +286,47 @@ def robots_blocks_page_resources(ctx: SiteContext) -> Iterator[Finding]:
                 "not allowed to fetch. Google and Apple both ask that the CSS and "
                 "JavaScript required to display a page stay crawlable.",
         )
+
+
+@site_analyzer
+def measurement(ctx: SiteContext) -> Iterator[Finding]:
+    """Whether anything on this site reports traffic.
+
+    A site-level question, and it has to be: only a sample of pages is
+    fingerprinted, so asking it per page meant it silently never fired on any
+    page past the sample.
+
+    A consent gate changes the answer entirely. This crawler never accepts
+    cookies and neither does a search engine crawler, so on a site that holds its
+    tags behind consent there is nothing to find before consent — and calling
+    that "no analytics" is simply wrong. It was, for a site running three GA4
+    properties.
+    """
+    # Gate on having looked, not on having found something: detecting no
+    # technology at all is precisely the case this check exists for.
+    if not ctx.html_pages:
+        return
+    categories = {tech.category for tech in ctx.technologies}
+    if categories & {"analytics", "tag-manager"}:
+        return
+
+    if "consent" in categories:
+        gate = ", ".join(sorted(t.name for t in ctx.technologies
+                                if t.category == "consent"))
+        yield info(
+            "technical.analytics_behind_consent",
+            "No analytics loads before cookie consent",
+            evidence=f"consent gate: {gate}",
+            fix="Expected, and not a fault: this crawler never accepts cookies, and neither "
+                "does a search engine crawler. Whether analytics fires for real visitors "
+                "cannot be told from here — check in a browser after accepting.",
+        )
+        return
+
+    yield notice(
+        "technical.no_analytics",
+        "No analytics or tag manager detected anywhere on the site",
+        fix="Nothing here reports traffic, so SEO work cannot be measured. No consent banner "
+            "was found either, so this is unlikely to be tags waiting on consent — but it is "
+            "worth confirming in a browser.",
+    )

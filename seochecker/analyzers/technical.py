@@ -254,20 +254,3 @@ def render_path(ctx: PageContext) -> Iterator[Finding]:
             fix="Add <link rel=\"icon\">. Browsers fall back to /favicon.ico, but Google also "
                 "shows the favicon in mobile results.",
         )
-
-
-@analyzer
-def measurement(ctx: PageContext) -> Iterator[Finding]:
-    """No analytics and no tag manager means nothing about this page is measured."""
-    if not ctx.doc or not ctx.technologies:
-        return
-    categories = {tech.category for tech in ctx.technologies}
-    if categories & {"analytics", "tag-manager"}:
-        return
-    yield notice(
-        "technical.no_analytics",
-        "No analytics or tag manager detected",
-        fix="Nothing here reports traffic, so SEO work on this page cannot be measured. "
-            "If analytics loads through a consent manager, it may simply not fire before "
-            "consent — worth confirming by hand.",
-    )

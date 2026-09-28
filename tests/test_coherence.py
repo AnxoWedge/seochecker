@@ -196,3 +196,65 @@ class SingleModeParityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ConsentGateTests(unittest.TestCase):
+    """A crawler never accepts cookies, so a consent gate changes what absence means.
+
+    Reported "No analytics or tag manager detected" for a live French site that
+    runs three GA4 properties — all of them behind its cookie banner. Before
+    consent: nothing loads. After: eight requests to Google.
+    """
+
+    BODY = ("<title>A page about handmade shoes</title>"
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            "</head><body><h1>Shoes</h1><p>" + ("word " * 120) + "</p>")
+
+    def analyse(self, extra: str = "") -> dict[str, object]:
+        from seochecker.fingerprint import Fingerprinter
+        html = f'<html lang="en"><head>{self.BODY}{extra}</body></html>'
+        page = Page(requested_url="https://e.test/", final_url="https://e.test/",
+                    status=200, mime="text/html",
+                    headers={"content-type": "text/html"}, html=html)
+        page.timing.ttfb_ms = 100
+        doc = Document(html, page.final_url)
+        technologies = Fingerprinter().detect(page, doc)
+        context = SiteContext(config=CrawlConfig(url=page.final_url), pages=[page],
+                              technologies=technologies)
+        return {"ids": {f.id for f in run_site_analyzers(context)},
+                "consent": {t.name for t in technologies if t.category == "consent"}}
+
+    def test_a_custom_consent_banner_is_detected(self):
+        for markup in (
+            '<div class="cookie-consent" role="dialog">Accept?</div>',
+            '<div id="cookie-banner">Accept?</div>',
+            '<div class="consent-modal">Accept?</div>',
+            "<script>localStorage.getItem('site-consent')</script>",
+            "<script>window.__tcfapi = function(){}</script>",
+        ):
+            with self.subTest(markup=markup):
+                self.assertTrue(self.analyse(markup)["consent"],
+                                "consent gate not detected")
+
+    def test_prose_about_cookies_is_not_a_consent_banner(self):
+        """Structural markers only — a page may simply write about cookies."""
+        result = self.analyse("<p>We use cookies to bake biscuits. Consent is a "
+                              "concept in contract law.</p>")
+        self.assertEqual(result["consent"], set())
+
+    def test_absent_analytics_behind_a_consent_gate_is_information_not_a_fault(self):
+        result = self.analyse('<div class="cookie-consent">Accept?</div>')
+        self.assertIn("technical.analytics_behind_consent", result["ids"])
+        self.assertNotIn("technical.no_analytics", result["ids"])
+
+    def test_absent_analytics_with_no_consent_gate_is_still_reported(self):
+        result = self.analyse()
+        self.assertIn("technical.no_analytics", result["ids"])
+        self.assertNotIn("technical.analytics_behind_consent", result["ids"])
+
+    def test_neither_fires_when_analytics_is_actually_present(self):
+        result = self.analyse(
+            '<div class="cookie-consent">Accept?</div>'
+            '<script src="https://www.googletagmanager.com/gtm.js?id=GTM-ABCD123"></script>')
+        self.assertNotIn("technical.no_analytics", result["ids"])
+        self.assertNotIn("technical.analytics_behind_consent", result["ids"])

@@ -436,6 +436,19 @@ technologies:
       - {type: script, pattern: 'cdn-cookieyes\.com', confidence: 1.0}
       - {type: html, pattern: 'cookie-law-info', confidence: 0.8}
 
+  Cookie consent banner:
+    category: consent
+    signals:
+      # The IAB Transparency and Consent Framework API. Unambiguous.
+      - {type: html, pattern: '__tcfapi', confidence: 1.0}
+      # Structural markers only — an element named for consent, not prose that
+      # happens to mention cookies.
+      - {type: html, pattern: '(?:class|id)="[^"]*cookie[-_]?(?:consent|banner|notice|bar|popup|modal)', confidence: 0.9}
+      - {type: html, pattern: '(?:class|id)="[^"]*consent[-_]?(?:banner|bar|modal|dialog|popup)', confidence: 0.9}
+      - {type: html, pattern: 'localStorage\.[gs]etItem\(\s*[''"][^''"]*consent', confidence: 0.9}
+      - {type: html, pattern: 'aria-label="[^"]*(?:cookie|consent)', confidence: 0.8}
+      - {type: js, key: __tcfapi, confidence: 1.0}
+
   Complianz:
     category: consent
     implies: [WordPress]

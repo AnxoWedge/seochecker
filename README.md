@@ -421,6 +421,15 @@ Named crawlers are checked by token, so `Applebot`, `Qwantbot`, `Bingbot`,
 `DuckDuckBot` and the rest are each verified against robots.txt rather than assumed
 to behave like Googlebot.
 
+### Consent banners
+
+This crawler never accepts cookies, and neither does a search engine crawler. On a
+site that holds its tags behind a consent banner — most of the EU — nothing
+analytics-related loads before consent, so "no analytics detected" would be plainly
+wrong. Consent gates are detected, including hand-rolled ones, and the finding
+becomes information rather than a fault: *analytics does not load before consent,
+and whether it fires for real visitors cannot be told from here.*
+
 ## What it identifies
 
 68 technologies across 20 categories, driven by
