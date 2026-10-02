@@ -50,6 +50,18 @@ class Finding:
     # scored as a problem affecting every page.
     affected: int = 0
 
+    @property
+    def lenses(self) -> tuple[str, ...]:
+        """Which of search, AI answers and speed this finding bears on."""
+        from .lenses import lenses_for
+        return lenses_for(self.id, self.category)
+
+    @property
+    def lens(self) -> str:
+        """The single heading this finding is listed under."""
+        from .lenses import primary_lens
+        return primary_lens(self.id, self.category)
+
 
 @dataclass(slots=True)
 class RedirectHop:
@@ -150,7 +162,8 @@ class Page:
         data = asdict(self)
         data["error"] = self.error.value if self.error else None
         data["findings"] = [
-            {**asdict(f), "severity": f.severity.value} for f in self.findings
+            {**asdict(f), "severity": f.severity.value, "lenses": list(f.lenses)}
+            for f in self.findings
         ]
         data["ok"] = self.ok
         data["is_html"] = self.is_html

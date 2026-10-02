@@ -107,6 +107,7 @@ async def run_crawl(config: CrawlConfig, on_page=None, should_stop=None) -> Craw
             pages=result.pages,
             robots=result.robots,
             sitemap=result.sitemap,
+            llms_txt=result.llms_txt,
             sitemap_urls=set(result.frontier.get("sitemap_urls", [])),
             frontier=result.frontier,
             technologies=result.technologies,
@@ -403,136 +404,110 @@ def render_human(page: Page, seo: dict[str, Any] | None, technologies: list[Dete
 
 def render_crawl(result: CrawlResult, config: CrawlConfig, minimum: Severity,
                  card: Scorecard | None = None) -> None:
+    """Report what to improve, grouped by what improving it would buy you."""
     from rich.console import Console
     from rich.table import Table
     from rich.text import Text
 
+    from .lenses import ALL_LENSES, LABELS
+
     console = Console(stderr=True)
-    ok_pages = [p for p in result.pages if p.error is None and p.ok]
+    pages = [p for p in result.pages if not p.duplicate_of]
+    ok_pages = [p for p in pages if p.error is None and p.ok]
     duration = result.stats.get("duration_ms", 0) / 1000
 
-    console.print(
-        f"\n[bold]{config.url}[/bold]  "
-        f"[dim]{len(result.pages)} pages in {duration:.1f}s · "
-        f"{result.stats.get('requests', 0)} requests · "
-        f"{result.stats.get('bytes_downloaded', 0) / 1_048_576:.1f} MB[/dim]"
-    )
-    console.print(f"[dim]stopped: {result.stopped_because or 'frontier exhausted'}[/dim]")
+    # --- headline ----------------------------------------------------------
+    console.print(f"\n[bold]{config.url}[/bold]  "
+                  f"[dim]{len(pages)} pages in {duration:.0f}s · "
+                  f"{len(ok_pages)}/{len(pages)} returned 200[/dim]")
 
     if card:
-        colour = ("green" if card.overall >= 80 else
-                  "yellow" if card.overall >= 60 else "red")
-        weakest = " · ".join(f"{c.category} {c.score:.0f}" for c in card.categories[:3]
-                             if c.score < 100)
-        console.print(f"\n[bold {colour}]Score {card.overall:.0f}/100  (grade {card.grade})"
-                      f"[/bold {colour}]" + (f"  [dim]weakest: {weakest}[/dim]" if weakest else ""))
+        def tint(value: float) -> str:
+            return "green" if value >= 85 else "yellow" if value >= 65 else "red"
 
-    overview = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
-    overview.add_column(style="dim", width=15)
-    overview.add_column(overflow="fold")
-    robots = result.robots
-    overview.add_row("robots.txt",
-                     f"{'found' if robots.fetched else robots.error or robots.status or 'none'}"
-                     + (f" · {len(robots.sitemaps)} sitemap(s) declared" if robots.sitemaps else ""))
-    overview.add_row("sitemap",
-                     f"{len(result.sitemap.entries)} URLs across "
-                     f"{len(result.sitemap.fetched)} file(s)"
-                     if result.sitemap.fetched else "[yellow]none found[/yellow]")
-    by_status = Counter(p.status for p in result.pages if p.status)
-    overview.add_row("statuses", " · ".join(f"{code}: {n}" for code, n in sorted(by_status.items())))
-    rendered = result.stats.get("rendered")
-    if note := result.stats.get("render"):
-        overview.add_row("rendering", f"[yellow]{note}[/yellow]")
-    elif rendered:
-        failures = result.stats.get("render_failures") or 0
-        gained = sum(1 for p in result.pages
-                     if p.render_diff.get("words_after", 0) > p.render_diff.get("words_before", 0))
-        overview.add_row("rendering",
-                         f"{rendered} page(s) rendered · {gained} gained content from JavaScript"
-                         + (f" · [yellow]{failures} failed[/yellow]" if failures else ""))
-    if skipped := result.frontier.get("skipped"):
-        overview.add_row("skipped", " · ".join(f"{n} {why}" for why, n in
-                                               list(skipped.items())[:5]))
-    console.print()
-    console.print(overview)
-
-    graph = result.graph
-    if len(graph.nodes) > 1:
-        structure = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
-        structure.add_column(style="dim", width=15)
-        structure.add_column(overflow="fold")
-        edges = sum(len(targets) for targets in graph.outgoing.values())
-        structure.add_row("link graph",
-                          f"{len(graph.nodes)} pages · {edges} internal links · "
-                          f"deepest page {(deepest := max(graph.click_depth.values(), default=0))} "
-                          f"click{'s' if deepest != 1 else ''} from home")
-        if orphans := graph.orphans():
-            structure.add_row("orphans", f"[yellow]{len(orphans)}[/yellow] page(s) with no "
-                                         f"inbound internal link")
-        if unreachable := graph.unreachable():
-            structure.add_row("unreachable", f"[yellow]{len(unreachable)}[/yellow] page(s) not "
-                                             f"reachable by following links from the start URL")
-        structure.add_row(
-            "authority",
-            " · ".join(f"{_short(url, config.url)} [dim]{score:.1%}[/dim]"
-                       for url, score in graph.top_by_pagerank(4)),
-        )
-        console.print("\n[bold]Structure[/bold] [dim](authority = internal PageRank)[/dim]")
-        console.print(structure)
-
-    render_technologies(console, result.technologies)
-
-    if result.site_findings:
-        render_findings(console, result.site_findings, minimum, title="Site findings")
-
-    # One line per issue type, not per page — a 500-page crawl would otherwise
-    # print thousands of near-identical lines.
-    page_findings = [f for page in result.pages for f in page.findings]
-    if page_findings:
-        grouped: dict[str, list[Finding]] = {}
-        for finding in page_findings:
-            grouped.setdefault(finding.id, []).append(finding)
-
-        rows = sorted(
-            grouped.items(),
-            key=lambda item: (SEVERITY_RANK[item[1][0].severity], -len(item[1])),
-        )
-        console.print(f"\n[bold]Page findings[/bold] [dim]({len(page_findings)} across "
-                      f"{len(result.pages)} pages)[/dim]")
-        table = Table(box=None, padding=(0, 2, 0, 0), header_style="dim")
-        table.add_column("severity", width=9)
-        table.add_column("finding", width=32)
-        table.add_column("pages", justify="right", width=6)
-        table.add_column("example", overflow="fold")
-        for finding_id, items in rows:
-            severity = items[0].severity
-            if SEVERITY_RANK[severity] > SEVERITY_RANK[minimum]:
+        parts = [f"[bold {tint(card.overall)}]{card.overall:.0f}/100[/bold {tint(card.overall)}]"
+                 f" [dim]grade {card.grade}[/dim]"]
+        for lens in ALL_LENSES:
+            value = card.lenses.get(lens)
+            if value is None:
                 continue
-            label, style = SEVERITY_STYLE[severity]
-            table.add_row(
-                Text(label.strip(), style=style.replace("on ", "").replace("bold white", "bold")),
-                finding_id,
-                str(len(items)),
-                _short(items[0].url or "", config.url),
-            )
-        console.print(table)
+            if lens == "performance" and not result.vitals_measured:
+                parts.append(f"[dim]{LABELS[lens]} not measured (--vitals)[/dim]")
+                continue
+            parts.append(f"{LABELS[lens]} [{tint(value)}]{value:.0f}[/{tint(value)}]")
+        console.print("  " + "   ".join(parts))
 
-    problems = [p for p in result.pages if p.error is not None or not p.ok]
-    if problems:
-        console.print(f"\n[bold]Pages that did not return 200[/bold] [dim]({len(problems)})[/dim]")
-        for page in problems[:15]:
-            state = page.error.value if page.error else str(page.status)
-            console.print(f"  [red]{state:<12}[/red] {_short(page.requested_url, config.url)}")
-        if len(problems) > 15:
-            console.print(f"  [dim]... and {len(problems) - 15} more[/dim]")
+    # --- context, in two lines rather than three panels ---------------------
+    robots = result.robots
+    crawl_bits = [
+        "robots.txt " + ("found" if robots.fetched else str(robots.error or robots.status or "none")),
+        (f"sitemap {len(result.sitemap.entries)} URLs" if result.sitemap.fetched
+         else "[yellow]no sitemap[/yellow]"),
+    ]
+    if result.graph.nodes:
+        summary = result.graph.summary()
+        crawl_bits.append(f"{summary['edges']} internal links")
+        if summary["orphans"]:
+            crawl_bits.append(f"[yellow]{summary['orphans']} orphans[/yellow]")
+    if result.stats.get("rendered"):
+        crawl_bits.append(f"{result.stats['rendered']} rendered")
+    if result.vitals_measured:
+        crawl_bits.append(f"{result.vitals_measured} measured")
+    console.print(f"  [dim]{' · '.join(crawl_bits)}[/dim]")
 
-    counts = Counter(f.severity for f in page_findings + result.site_findings)
+    if result.technologies:
+        shown = [t for t in result.technologies if not t.implied_by][:7]
+        stack = " · ".join(f"{t.name}{' ' + t.version if t.version else ''}" for t in shown)
+        console.print(f"  [dim]stack: {stack}[/dim]")
+
+    # --- findings, grouped by what fixing them buys --------------------------
+    findings = list(result.site_findings) + [f for p in pages for f in p.findings]
+    if not findings:
+        console.print("\n[green]Nothing to report.[/green]\n")
+        return
+
+    grouped: dict[str, dict[str, list[Finding]]] = {lens: {} for lens in ALL_LENSES}
+    for finding in findings:
+        if SEVERITY_RANK[finding.severity] > SEVERITY_RANK[minimum]:
+            continue
+        grouped.setdefault(finding.lens, {}).setdefault(finding.id, []).append(finding)
+
+    # Laid out by hand rather than with a table: a table shrinks its columns to
+    # fit and silently truncated the severity labels to "W…".
+    severity_tag = {
+        Severity.CRITICAL: "[bold red]CRIT[/bold red]",
+        Severity.WARNING: "[yellow]WARN[/yellow]",
+        Severity.NOTICE: "[cyan]note[/cyan]",
+        Severity.INFO: "[dim]info[/dim]",
+    }
+
+    for lens in ALL_LENSES:
+        items = grouped.get(lens) or {}
+        console.print(f"\n[bold]{LABELS[lens].upper()}[/bold]")
+
+        if lens == "performance" and not result.vitals_measured:
+            console.print("  [dim]Core Web Vitals were not measured. "
+                          "Re-run with --vitals for LCP, CLS and blocking time.[/dim]")
+        if not items:
+            console.print("  [green]nothing to improve here[/green]")
+            continue
+
+        rows = sorted(items.items(),
+                      key=lambda kv: (SEVERITY_RANK[kv[1][0].severity], -len(kv[1])))
+        for finding_id, found in rows:
+            scope = "site" if found[0].url is None else f"{len(found)}p"
+            # rich knows the real terminal width; trimming by hand got it wrong.
+            console.print(f"  {severity_tag[found[0].severity]}  "
+                          f"{finding_id:<34.34} [dim]{scope:>5}[/dim]  {found[0].message}",
+                          highlight=False, no_wrap=True, overflow="ellipsis")
+
+    counts = Counter(f.severity for f in findings)
     console.print(
         f"\n[red]{counts[Severity.CRITICAL]} critical[/red] · "
         f"[yellow]{counts[Severity.WARNING]} warning[/yellow] · "
         f"[cyan]{counts[Severity.NOTICE]} notice[/cyan] · "
-        f"[blue]{counts[Severity.INFO]} info[/blue]"
-        f"   [dim]{len(ok_pages)}/{len(result.pages)} pages returned 200[/dim]\n"
+        f"[dim]{counts[Severity.INFO]} info[/dim]"
+        f"   [dim]full detail in the JSON and HTML reports[/dim]\n"
     )
 
 

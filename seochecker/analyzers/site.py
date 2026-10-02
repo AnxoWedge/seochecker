@@ -75,12 +75,6 @@ def sitemap_health(ctx: SiteContext) -> Iterator[Finding]:
         )
         return
 
-    yield info(
-        "sitemap.found",
-        f"{len(sitemap.entries)} URL(s) across {len(sitemap.fetched)} sitemap file(s)",
-        evidence=sample(sitemap.fetched, 3),
-    )
-
     if sitemap.failed:
         yield warning(
             "sitemap.partly_unreadable",
@@ -207,15 +201,31 @@ SEARCH_CRAWLERS = {
     "slurp": "Yahoo",
 }
 
-# Blocking these is a legitimate editorial choice, not a mistake, so it is
-# reported as information rather than a problem.
-AI_CRAWLERS = {
-    "gptbot": "OpenAI",
-    "google-extended": "Google AI training",
-    "applebot-extended": "Apple AI training",
-    "ccbot": "Common Crawl",
-    "claudebot": "Anthropic",
+# Answer engines. These are the crawlers that fetch a page in order to *cite* it
+# in an AI answer, and blocking one costs visibility exactly the way blocking a
+# search engine does.
+#
+# They are deliberately separate from the training crawlers below, because the
+# vendors made them separate: you can decline to feed model training and still be
+# quotable in ChatGPT, Claude or Perplexity. Treating the two as one thing — which
+# this tool did — hides a real loss behind an editorial choice.
+ANSWER_ENGINES = {
+    "oai-searchbot": "ChatGPT search",
+    "chatgpt-user": "ChatGPT (user-initiated fetches)",
+    "claude-searchbot": "Claude search",
+    "claude-user": "Claude (user-initiated fetches)",
     "perplexitybot": "Perplexity",
+    "perplexity-user": "Perplexity (user-initiated fetches)",
+}
+
+# Training crawlers. Blocking these is a choice about your content, not a
+# visibility problem, so it is recorded rather than judged.
+TRAINING_CRAWLERS = {
+    "gptbot": "OpenAI model training",
+    "google-extended": "Google Gemini training",
+    "claudebot": "Anthropic model training",
+    "applebot-extended": "Apple model training",
+    "ccbot": "Common Crawl",
     "bytespider": "ByteDance",
 }
 
@@ -227,31 +237,40 @@ def robots_blocks_search_engines(ctx: SiteContext) -> Iterator[Finding]:
     if not robots.fetched:
         return
 
-    blocked_search = [
-        label for token, label in SEARCH_CRAWLERS.items()
-        if not robots.is_allowed(ctx.config.url, token)
-    ]
-    if blocked_search:
+    blocked = [label for token, label in SEARCH_CRAWLERS.items()
+               if not robots.is_allowed(ctx.config.url, token)]
+    if blocked:
         yield critical(
             "robots.blocks_search_engine",
-            f"robots.txt blocks {len(blocked_search)} search engine(s) from the site",
-            evidence=", ".join(blocked_search),
+            f"robots.txt blocks {len(blocked)} search engine(s) from the site",
+            evidence=", ".join(blocked),
             fix="These crawlers are being told not to fetch this URL at all, so the site "
                 "cannot appear in their results. Remove the disallow rule unless that is "
                 "genuinely intended.",
         )
 
-    blocked_ai = [
-        label for token, label in AI_CRAWLERS.items()
-        if not robots.is_allowed(ctx.config.url, token)
-    ]
-    if blocked_ai:
+    shut_out = [label for token, label in ANSWER_ENGINES.items()
+                if not robots.is_allowed(ctx.config.url, token)]
+    if shut_out:
+        yield warning(
+            "robots.blocks_answer_engines",
+            f"robots.txt blocks {len(shut_out)} AI answer engine(s)",
+            evidence=", ".join(shut_out),
+            fix="These fetch pages in order to cite them in answers, and are separate from "
+                "the crawlers that collect training data. Blocking them removes the site "
+                "from AI answers without protecting it from training — which is usually the "
+                "opposite of what was intended.",
+        )
+
+    training = [label for token, label in TRAINING_CRAWLERS.items()
+                if not robots.is_allowed(ctx.config.url, token)]
+    if training:
         yield info(
-            "robots.blocks_ai_crawlers",
-            f"robots.txt blocks {len(blocked_ai)} AI crawler(s)",
-            evidence=", ".join(blocked_ai),
-            fix="Recorded for completeness — whether to allow AI crawlers is an editorial "
-                "decision, not an SEO problem.",
+            "robots.blocks_ai_training",
+            f"robots.txt blocks {len(training)} AI training crawler(s)",
+            evidence=", ".join(training),
+            fix="Recorded, not judged: declining to feed model training is a decision about "
+                "your content. It does not affect whether answer engines can cite you.",
         )
 
 
@@ -329,4 +348,34 @@ def measurement(ctx: SiteContext) -> Iterator[Finding]:
         fix="Nothing here reports traffic, so SEO work cannot be measured. No consent banner "
             "was found either, so this is unlikely to be tags waiting on consent — but it is "
             "worth confirming in a browser.",
+    )
+
+
+@site_analyzer
+def llms_txt(ctx: SiteContext) -> Iterator[Finding]:
+    """Whether the site publishes /llms.txt.
+
+    Reported honestly, which means quietly. The major AI *search* crawlers —
+    GPTBot, ClaudeBot, PerplexityBot, OAI-SearchBot — overwhelmingly ignore the
+    file today and read the HTML instead, so this is not the lever some people
+    claim. What does fetch it are coding agents and in-product assistants, which
+    is a real and growing audience, and the file costs an afternoon.
+    """
+    if not ctx.llms_txt:
+        return
+    if ctx.llms_txt.get("present"):
+        yield info(
+            "robots.llms_txt_found",
+            f"/llms.txt is published ({ctx.llms_txt['bytes']:,} bytes)",
+        )
+        return
+
+    yield notice(
+        "robots.no_llms_txt",
+        "No /llms.txt",
+        evidence=f"HTTP {ctx.llms_txt.get('status') or 'no response'}",
+        fix="A plain-text map of what the site is and where its important pages are. "
+            "Today's AI search crawlers mostly ignore it and read the HTML, so this is not "
+            "urgent — but coding agents and in-product assistants do fetch it, and it costs "
+            "very little to publish.",
     )

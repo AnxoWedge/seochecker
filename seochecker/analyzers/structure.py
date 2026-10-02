@@ -155,24 +155,6 @@ def crawl_waste(ctx: SiteContext) -> Iterator[Finding]:
 
 
 @site_analyzer
-def authority_distribution(ctx: SiteContext) -> Iterator[Finding]:
-    """Report where internal authority pools. No API needed — it is our own link graph."""
-    graph = ctx.graph
-    if len(graph.nodes) < 3:
-        return
-
-    top = graph.top_by_pagerank(5)
-    yield info(
-        "structure.internal_pagerank",
-        "Internal authority concentrates on: "
-        + ", ".join(f"{url} ({score:.1%})" for url, score in top),
-        evidence=f"{len(graph.nodes)} pages, "
-                 f"{sum(len(t) for t in graph.outgoing.values())} internal links, "
-                 f"deepest page {max(graph.click_depth.values(), default=0)} clicks from home",
-    )
-
-
-@site_analyzer
 def external_link_health(ctx: SiteContext) -> Iterator[Finding]:
     """Only runs with --check-external, since it means requests to other people's servers."""
     if not ctx.external_links:

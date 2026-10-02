@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .. import __version__
+from ..lenses import ALL_LENSES, LABELS as LENS_LABELS
 from ..models import Finding, Page, Severity
 
 TEMPLATE = Path(__file__).parent / "template.html.j2"
@@ -30,28 +31,42 @@ def _shorten(url: str, limit: int = 68) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def group_findings(pages: list[Page]) -> list[dict[str, Any]]:
+def group_findings(pages: list[Page], site_findings: list[Finding] | None = None
+                   ) -> list[dict[str, Any]]:
     """One entry per distinct finding id, carrying the URLs it applies to."""
     buckets: dict[str, dict[str, Any]] = {}
-    for page in pages:
-        for finding in page.findings:
+    everything = [(None, f) for f in (site_findings or [])]
+    everything += [(p, f) for p in pages for f in p.findings]
+    for page, finding in everything:
+        if True:
             entry = buckets.get(finding.id)
             if entry is None:
                 entry = buckets[finding.id] = {
                     "id": finding.id,
                     "severity": finding.severity.value,
                     "category": finding.category,
+                    "lens": finding.lens,
                     "message": finding.message,
                     "evidence": finding.evidence,
                     "fix": finding.fix,
                     "urls": [],
+                    "site_wide": page is None,
                 }
-            entry["urls"].append(finding.url or page.final_url)
+            if page is not None or finding.url:
+                entry["urls"].append(finding.url or page.final_url)
     ordered = sorted(
         buckets.values(),
         key=lambda e: (SEVERITY_ORDER.get(e["severity"], 9), -len(e["urls"]), e["id"]),
     )
     return ordered
+
+
+def _by_lens(grouped: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Each finding under one heading, so the report is not read twice."""
+    out: dict[str, list[dict[str, Any]]] = {lens: [] for lens in ALL_LENSES}
+    for entry in grouped:
+        out.setdefault(entry["lens"], []).append(entry)
+    return out
 
 
 def build_context(
@@ -104,7 +119,10 @@ def build_context(
             for f in sorted(site_findings,
                             key=lambda f: (SEVERITY_ORDER.get(f.severity.value, 9), f.id))
         ],
-        "grouped": group_findings(pages),
+        "grouped": group_findings(pages, site_findings),
+        "by_lens": _by_lens(group_findings(pages, site_findings)),
+        "lens_labels": LENS_LABELS,
+        "lenses": list(ALL_LENSES),
         "score": score.to_dict() if score is not None and hasattr(score, "to_dict") else score,
         "technologies": [t.to_dict() if hasattr(t, "to_dict") else t
                          for t in (technologies or [])],

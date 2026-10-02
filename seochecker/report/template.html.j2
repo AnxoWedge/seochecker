@@ -126,7 +126,11 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
     <div class="score">{{ score.overall|round|int }}</div>
     <div>
       <div class="grade">Grade {{ score.grade }}</div>
-      <div class="meta" style="margin-top:6px">out of 100</div>
+      <div class="meta" style="margin-top:6px">
+        {% for lens in lenses %}{% if score.lenses.get(lens) is not none %}
+          {{ lens_labels[lens] }} <b>{{ score.lenses[lens]|round|int }}</b>{{ ' · ' if not loop.last }}
+        {% endif %}{% endfor %}
+      </div>
     </div>
   </div>
   {% endif %}
@@ -219,12 +223,13 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
 {% endif %}
 {% endif %}
 
-{% if score %}
-<h2>Scores by area</h2>
+{% set weak = score.categories | selectattr('deductions') | list if score else [] %}
+{% if weak %}
+<h2>Where the points went</h2>
 <div class="panel"><div class="inner"><table>
   <thead><tr><th>Area</th><th style="width:180px">Score</th><th>Biggest deduction</th><th style="text-align:right">Issues</th></tr></thead>
   <tbody>
-  {% for c in score.categories %}
+  {% for c in weak %}
     <tr>
       <td><b>{{ c.category }}</b></td>
       <td>
@@ -235,9 +240,8 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
         </div>
       </td>
       <td class="mono" style="color:var(--muted)">
-        {%- if c.deductions -%}
-          {{ c.deductions[0].finding_id }} <span style="opacity:.7">(&minus;{{ c.deductions[0].overall_points|round(1) }})</span>
-        {%- else -%}<span style="opacity:.6">none</span>{%- endif -%}
+        {{ c.deductions[0].finding_id }}
+        <span style="opacity:.7">(&minus;{{ c.deductions[0].overall_points|round(1) }})</span>
       </td>
       <td style="text-align:right;color:var(--muted)">{{ c.deductions|length }}</td>
     </tr>
@@ -302,15 +306,10 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
 {% endif %}
 
 {% if technologies %}
-<h2>Technology</h2>
-<div class="panel"><div class="inner" style="padding:14px">
-  <div class="chips">
-  {% for t in technologies %}
-    <span class="chip" title="{{ t.evidence|join(' · ') }}">{{ t.category }}: <b>{{ t.name }}{% if t.version %} {{ t.version }}{% endif %}</b>
-      {{ (t.confidence * 100)|round|int }}%{% if t.implied_by %} · inferred{% endif %}</span>
-  {% endfor %}
-  </div>
-</div></div>
+<div style="margin-top:14px;color:var(--muted);font-size:12.5px">
+  <b style="color:var(--text)">Stack</b> ·
+  {% for t in technologies if not t.implied_by %}{{ t.name }}{% if t.version %} {{ t.version }}{% endif %}{{ ' · ' if not loop.last }}{% endfor %}
+</div>
 {% endif %}
 
 {% if crawl %}
@@ -330,10 +329,7 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
     {% if stats.rendered %}
     <tr><td style="color:var(--muted)">rendering</td><td class="mono">{{ stats.rendered }} page(s) rendered</td></tr>
     {% endif %}
-    {% if crawl.frontier.skipped %}
-    <tr><td style="color:var(--muted)">skipped</td><td class="mono">
-      {% for why, n in crawl.frontier.skipped.items() %}{{ n }} {{ why }}{{ ' · ' if not loop.last }}{% endfor %}</td></tr>
-    {% endif %}
+
   </tbody>
 </table></div></div>
 {% endif %}
@@ -353,61 +349,43 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);
   {% endfor %}
   </tbody>
 </table></div></div>
-{% elif graph and graph.nodes and graph.authority_spread < 1.25 %}
-<h2>Where internal authority sits</h2>
-<div class="panel"><div class="empty">Internal authority is spread evenly across all
-{{ graph.nodes }} pages — every page links to most of the others, so no page is
-meaningfully more prominent than another in the internal link graph.</div></div>
 {% endif %}
 
-{% if site_findings %}
-<h2>Site-wide findings</h2>
-<div class="panel">
-{% for f in site_findings %}
-  <details class="finding" {{ 'open' if f.severity in ('critical', 'warning') }}>
-    <summary>
-      <span class="sev {{ f.severity }}">{{ f.severity }}</span>
-      <span><span class="fid mono">{{ f.id }}</span><div class="fmsg">{{ f.message }}</div></span>
-      <span class="count"></span>
-    </summary>
-    <div class="body">
-      {% if f.evidence %}<div class="ev">{{ f.evidence }}</div>{% endif %}
-      {% if f.fix %}<div class="fix">{{ f.fix }}</div>{% endif %}
-    </div>
-  </details>
-{% endfor %}
-</div>
-{% endif %}
-
-{% if grouped %}
-<h2>Page findings</h2>
-<div class="filters" id="sevfilter">
+{% for lens in lenses %}
+{% set items = by_lens.get(lens) or [] %}
+<h2>{{ lens_labels[lens] }}</h2>
+{% if not items %}
+<div class="panel"><div class="empty">Nothing to improve here.</div></div>
+{% else %}
+<div class="filters" data-lens="{{ lens }}">
   <button class="on" data-sev="all">All</button>
   <button data-sev="critical">Critical</button>
   <button data-sev="warning">Warning</button>
   <button data-sev="notice">Notice</button>
-  <button data-sev="info">Info</button>
 </div>
-<div class="panel" id="groups">
-{% for g in grouped %}
-  <details class="finding" data-sev="{{ g.severity }}" {{ 'open' if g.severity == 'critical' }}>
+<div class="panel groups">
+{% for g in items %}
+  <details class="finding" data-sev="{{ g.severity }}" {{ 'open' if g.severity in ('critical', 'warning') }}>
     <summary>
       <span class="sev {{ g.severity }}">{{ g.severity }}</span>
       <span><span class="fid mono">{{ g.id }}</span><div class="fmsg">{{ g.message }}</div></span>
-      <span class="count">{{ g.urls|length }} page{{ '' if g.urls|length == 1 else 's' }}</span>
+      <span class="count">{{ 'site-wide' if g.site_wide else (g.urls|length ~ (' page' if g.urls|length == 1 else ' pages')) }}</span>
     </summary>
     <div class="body">
       {% if g.evidence %}<div class="ev">{{ g.evidence }}</div>{% endif %}
       {% if g.fix %}<div class="fix">{{ g.fix }}</div>{% endif %}
+      {% if g.urls %}
       <ul class="urls">
         {% for u in g.urls[:25] %}<li><a href="{{ u }}">{{ u|short }}</a></li>{% endfor %}
         {% if g.urls|length > 25 %}<li style="color:var(--muted)">… and {{ g.urls|length - 25 }} more</li>{% endif %}
       </ul>
+      {% endif %}
     </div>
   </details>
 {% endfor %}
 </div>
 {% endif %}
+{% endfor %}
 
 <h2>Pages</h2>
 <div class="panel"><div class="inner"><table id="pages">
@@ -470,19 +448,19 @@ meaningfully more prominent than another in the internal link graph.</div></div>
     });
   }
   // Severity filter for the grouped findings.
-  var filter = document.getElementById('sevfilter');
-  if (filter) {
+  document.querySelectorAll('.filters[data-lens]').forEach(function(filter){
+    var panel = filter.nextElementSibling;
     filter.addEventListener('click', function(event){
       var button = event.target.closest('button');
       if (!button) return;
       filter.querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); });
       button.classList.add('on');
       var want = button.dataset.sev;
-      document.querySelectorAll('#groups details').forEach(function(d){
+      panel.querySelectorAll('details').forEach(function(d){
         d.hidden = !(want === 'all' || d.dataset.sev === want);
       });
     });
-  }
+  });
 })();
 </script>
 </body>

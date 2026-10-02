@@ -406,6 +406,37 @@ ignores one-way `hreflang`: *"If two pages don't both point to each other, the
 tags will be ignored."* An alternate the crawl budget never reached is given the
 benefit of the doubt.
 
+Every finding is tagged with what fixing it would buy you, and the report is
+organised around those three questions rather than around severity alone:
+
+| Lens | The question it answers |
+| --- | --- |
+| **Search** | Will search engines index this, understand it, and rank it? |
+| **AI answers** | Can AI assistants read it and cite it? |
+| **Speed** | How fast is it for the person who actually arrives? |
+
+Each gets its own score, so the summary says *which* of the three needs work.
+A finding counts toward every lens it affects when scoring — a page that needs
+JavaScript genuinely costs both search and AI — but appears under one heading
+only, because listing the same thing twice makes a report longer without saying
+more.
+
+### AI answers
+
+Two things make AIO different from SEO rather than a rebrand of it:
+
+- **Answer engines are separate crawlers from training crawlers.** `OAI-SearchBot`,
+  `Claude-SearchBot` and `PerplexityBot` fetch pages in order to *cite* them;
+  `GPTBot`, `ClaudeBot` and `Google-Extended` collect training data. Blocking the
+  first group costs visibility the way blocking a search engine does. Blocking the
+  second is a decision about your content and is recorded without judgement.
+  Conflating them hides a real loss behind an editorial choice.
+- **Almost none of them execute JavaScript.** Content, links, titles or
+  descriptions that only exist after rendering are reported under this lens.
+
+`/llms.txt` is checked and reported quietly. Today's AI search crawlers largely
+ignore it and read the HTML; coding agents and in-product assistants do fetch it.
+
 Severities are `critical`, `warning`, `notice`, `info`. A page that is blocked or
 fails to fetch reports **only that** — a bot-mitigation challenge page is never
 described as if it were the site.

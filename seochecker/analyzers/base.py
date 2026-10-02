@@ -81,6 +81,7 @@ class SiteContext:
     pages: list[Page] = field(default_factory=list)
     robots: RobotsTxt = field(default_factory=RobotsTxt)
     sitemap: SitemapSet = field(default_factory=SitemapSet)
+    llms_txt: dict = field(default_factory=dict)
     sitemap_urls: set[str] = field(default_factory=set)
     frontier: dict = field(default_factory=dict)
     technologies: list = field(default_factory=list)

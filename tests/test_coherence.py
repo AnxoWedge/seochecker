@@ -108,13 +108,33 @@ class RobotsGuidanceTests(unittest.TestCase):
         self.assertIn("Apple", found["robots.blocks_search_engine"].evidence)
         self.assertEqual(found["robots.blocks_search_engine"].severity, Severity.CRITICAL)
 
-    def test_blocking_an_ai_crawler_is_only_recorded(self):
-        """Whether to allow AI crawlers is an editorial choice, not an SEO fault."""
+    def test_blocking_a_training_crawler_is_only_recorded(self):
+        """Declining to feed model training is a decision about your content."""
         found = site([self.page_with_resources([])],
                      "User-agent: *\nDisallow:\n\nUser-agent: GPTBot\nDisallow: /\n")
-        self.assertIn("robots.blocks_ai_crawlers", found)
-        self.assertEqual(found["robots.blocks_ai_crawlers"].severity, Severity.INFO)
+        self.assertIn("robots.blocks_ai_training", found)
+        self.assertEqual(found["robots.blocks_ai_training"].severity, Severity.INFO)
         self.assertNotIn("robots.blocks_search_engine", found)
+        self.assertNotIn("robots.blocks_answer_engines", found)
+
+    def test_blocking_an_answer_engine_is_a_real_loss(self):
+        """These cite you in AI answers. Blocking them costs visibility, and is
+        separate from declining to feed training."""
+        found = site([self.page_with_resources([])],
+                     "User-agent: *\nDisallow:\n\nUser-agent: PerplexityBot\nDisallow: /\n")
+        self.assertIn("robots.blocks_answer_engines", found)
+        self.assertEqual(found["robots.blocks_answer_engines"].severity, Severity.WARNING)
+        self.assertNotIn("robots.blocks_ai_training", found)
+
+    def test_the_two_are_not_confused(self):
+        """Blocking training must not be reported as losing AI citations."""
+        both = site([self.page_with_resources([])],
+                    "User-agent: *\nDisallow:\n\nUser-agent: GPTBot\nDisallow: /\n"
+                    "\nUser-agent: OAI-SearchBot\nDisallow: /\n")
+        self.assertIn("robots.blocks_ai_training", both)
+        self.assertIn("robots.blocks_answer_engines", both)
+        self.assertIn("ChatGPT search", both["robots.blocks_answer_engines"].evidence)
+        self.assertIn("OpenAI model training", both["robots.blocks_ai_training"].evidence)
 
     def test_qwant_is_recognised(self):
         found = site([self.page_with_resources([])],

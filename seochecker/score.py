@@ -129,12 +129,16 @@ class Scorecard:
     grade: str
     categories: list[CategoryScore] = field(default_factory=list)
     pages: int = 0
+    # One score per lens — search, AI answers, speed — so the summary says which
+    # of the three needs work rather than only that something does.
+    lenses: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "overall": round(self.overall, 1),
             "grade": self.grade,
             "pages_scored": self.pages,
+            "lenses": {k: round(v, 1) for k, v in self.lenses.items()},
             "categories": [c.to_dict() for c in self.categories],
         }
 
@@ -219,4 +223,16 @@ def score(findings: list[Finding], *, pages: int, categories: set[str]) -> Score
                                    for deductions in by_category.values()
                                    for d in deductions))
     scored.sort(key=lambda c: (c.score, -c.weight))
-    return Scorecard(overall=overall, grade=grade_for(overall), categories=scored, pages=pages)
+
+    # Each lens is scored from the deductions of the findings tagged to it, by the
+    # same arithmetic as the overall.
+    from .lenses import ALL_LENSES, lenses_for
+    by_lens: dict[str, float] = {lens: 0.0 for lens in ALL_LENSES}
+    for category, deductions in by_category.items():
+        for deduction in deductions:
+            for lens in lenses_for(deduction.finding_id, category):
+                by_lens[lens] += deduction.overall_points
+    lens_scores = {lens: max(0.0, 100.0 - cost) for lens, cost in by_lens.items()}
+
+    return Scorecard(overall=overall, grade=grade_for(overall), categories=scored,
+                     pages=pages, lenses=lens_scores)

@@ -68,6 +68,7 @@ class CrawlResult:
     soft_404_fingerprint: tuple = ()
     vitals_measured: int = 0
     bundle_bytes: int = 0
+    llms_txt: dict = field(default_factory=dict)
     external_data: list = field(default_factory=list)
     external_links: dict = field(default_factory=dict)
     frontier: dict[str, Any] = field(default_factory=dict)
@@ -289,6 +290,17 @@ class Crawler:
 
     # --- run ---------------------------------------------------------------
 
+    async def _check_llms_txt(self, fetcher: Fetcher) -> dict:
+        """Look for /llms.txt, the emerging convention for guiding AI agents."""
+        origin = f"{urlsplit(self.config.url).scheme}://{urlsplit(self.config.url).netloc}"
+        page = await fetcher.fetch(f"{origin}/llms.txt", force_read=True)
+        body = page.html or ""
+        return {
+            "present": bool(page.ok and body.strip() and not page.is_html),
+            "status": page.status,
+            "bytes": len(body),
+        }
+
     async def _read_bundles(self, page: Page, doc, fetcher: Fetcher) -> str:
         """Fetch the page's own JavaScript, so its contents can be fingerprinted.
 
@@ -417,6 +429,8 @@ class Crawler:
             if config.obey_robots:
                 self.result.robots = await self._load_robots(fetcher)
                 self._apply_crawl_delay(fetcher)
+
+            self.result.llms_txt = await self._check_llms_txt(fetcher)
 
             if config.probe_soft_404:
                 self.result.soft_404_fingerprint = await self._probe_soft_404(fetcher)

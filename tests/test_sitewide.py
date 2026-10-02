@@ -213,7 +213,15 @@ class SiteWideTests(unittest.TestCase):
         self.assertIn("structure.deep_pages", self.ids())
 
     def test_pagerank_is_reported(self):
-        self.assertIn("structure.internal_pagerank", self.ids())
+        # PageRank is reported through the link graph rather than as a finding:
+        # it is a fact about the site, not something to fix, and duplicating it
+        # as a finding printed the same numbers twice.
+        graph = self.result.graph
+        self.assertTrue(graph.pagerank)
+        self.assertAlmostEqual(sum(graph.pagerank.values()), 1.0, places=3)
+        top = graph.top_by_pagerank(3)
+        self.assertTrue(top)
+        self.assertGreaterEqual(top[0][1], top[-1][1])
 
     def test_correct_404s_produce_no_soft_404_finding(self):
         self.assertNotIn("structure.soft_404", self.ids())
